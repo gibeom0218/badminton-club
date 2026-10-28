@@ -58,6 +58,12 @@ function showConfirm(
   ]);
 }
 
+function formatWinRate(wins: number, losses: number): string {
+  const total = wins + losses;
+  if (total === 0) return '승률 -';
+  return `승률 ${Math.round((wins / total) * 100)}%`;
+}
+
 function formatMemberMeta(member: Member): string {
   const parts: string[] = [];
   if (member.gender === '남' || member.gender === '여') {
@@ -69,7 +75,11 @@ function formatMemberMeta(member: Member): string {
   if (member.grade?.trim()) {
     parts.push(member.grade.trim());
   }
-  return parts.length > 0 ? parts.join(' · ') : ' ';
+  const wins = member.wins ?? 0;
+  const losses = member.losses ?? 0;
+  parts.push(`${wins}승 ${losses}패`);
+  parts.push(formatWinRate(wins, losses));
+  return parts.join(' · ');
 }
 
 function parseFormAge(ageText: string): number | null | 'invalid' {

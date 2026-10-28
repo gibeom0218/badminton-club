@@ -41,9 +41,9 @@ export default function TabLayout() {
       <Tabs.Screen
         name="attendance"
         options={{
-          title: '출석',
+          title: '모임',
           tabBarIcon: ({ color }) => (
-            <TabBarIcon name="check-square-o" color={color} />
+            <TabBarIcon name="calendar" color={color} />
           ),
         }}
       />

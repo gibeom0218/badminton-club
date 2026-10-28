@@ -41,6 +41,9 @@ async function main(): Promise<void> {
           detail: 'GET /api/sessions/:id',
           attend: 'POST /api/sessions/:id/attendances',
           unattend: 'DELETE /api/sessions/:id/attendances/:memberId',
+          matches: 'GET /api/sessions/:id/matches',
+          createMatch: 'POST /api/sessions/:id/matches',
+          deleteMatch: 'DELETE /api/sessions/:id/matches/:matchId',
         },
       },
     });

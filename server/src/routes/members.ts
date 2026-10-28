@@ -30,7 +30,7 @@ function parseGender(value: unknown): '남' | '여' | null | 'invalid' {
 router.get('/', async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, age, grade, gender, created_at
+      `SELECT id, name, age, grade, gender, wins, losses, created_at
        FROM public.members
        ORDER BY name ASC`,
     );
@@ -74,7 +74,7 @@ router.post('/', async (req, res) => {
     const result = await pool.query(
       `INSERT INTO public.members (name, age, grade, gender)
        VALUES ($1, $2, $3, $4)
-       RETURNING id, name, age, grade, gender, created_at`,
+       RETURNING id, name, age, grade, gender, wins, losses, created_at`,
       [name, age, grade, gender],
     );
     res.status(201).json(result.rows[0]);
@@ -127,7 +127,7 @@ router.put('/:id', async (req, res) => {
            grade = $3,
            gender = $4
        WHERE id = $5
-       RETURNING id, name, age, grade, gender, created_at`,
+       RETURNING id, name, age, grade, gender, wins, losses, created_at`,
       [name, age, grade, gender, id],
     );
 

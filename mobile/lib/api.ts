@@ -1,4 +1,6 @@
 import type {
+  Match,
+  MatchInput,
   Member,
   MemberInput,
   Session,
@@ -84,6 +86,20 @@ export const api = {
       `/api/sessions/${sessionId}/attendances/${memberId}`,
       { method: 'DELETE' },
     ),
+
+  getMatches: (sessionId: number) =>
+    request<Match[]>(`/api/sessions/${sessionId}/matches`),
+
+  createMatch: (sessionId: number, payload: MatchInput) =>
+    request<Match>(`/api/sessions/${sessionId}/matches`, {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    }),
+
+  deleteMatch: (sessionId: number, matchId: number) =>
+    request<void>(`/api/sessions/${sessionId}/matches/${matchId}`, {
+      method: 'DELETE',
+    }),
 };
 
 export function getApiBaseUrl(): string {

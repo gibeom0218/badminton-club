@@ -6,6 +6,8 @@ export interface Member {
   age: number | null;
   grade: string | null;
   gender: Gender | null;
+  wins: number;
+  losses: number;
   created_at: string;
 }
 
@@ -31,5 +33,32 @@ export interface SessionInput {
   session_date: string;
   title?: string | null;
   place?: string | null;
+  note?: string | null;
+}
+
+export interface Match {
+  id: number;
+  session_id: number;
+  team_a_player1: number;
+  team_a_player2: number;
+  team_b_player1: number;
+  team_b_player2: number;
+  score_a: number;
+  score_b: number;
+  note: string | null;
+  created_at: string;
+  team_a_player1_name: string;
+  team_a_player2_name: string;
+  team_b_player1_name: string;
+  team_b_player2_name: string;
+}
+
+export interface MatchInput {
+  team_a_player1: number;
+  team_a_player2: number;
+  team_b_player1: number;
+  team_b_player2: number;
+  score_a: number;
+  score_b: number;
   note?: string | null;
 }

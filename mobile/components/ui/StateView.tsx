@@ -44,10 +44,13 @@ export function StateView({
     );
   }
 
-  return <>{children}</>;
+  return <View style={styles.content}>{children}</View>;
 }
 
 const styles = StyleSheet.create({
+  content: {
+    flex: 1,
+  },
   center: {
     flex: 1,
     alignItems: 'center',
