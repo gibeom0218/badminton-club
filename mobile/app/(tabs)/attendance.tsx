@@ -9,6 +9,7 @@ import {
   Platform,
   Pressable,
   RefreshControl,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -16,6 +17,7 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { MonthCalendar } from '@/components/ui/MonthCalendar';
 import { StateView } from '@/components/ui/StateView';
 import { colors, fonts, spacing } from '@/constants/theme';
 import { api } from '@/lib/api';
@@ -30,10 +32,20 @@ function todayIsoDate(): string {
 }
 
 function formatDisplayDate(isoDate: string): string {
-  const raw = isoDate.slice(0, 10);
-  const [y, m, d] = raw.split('-');
-  if (!y || !m || !d) return isoDate;
-  return `${y}.${m}.${d}`;
+  // API는 YYYY-MM-DD를 주지만, ISO datetime이 오면 로컬 날짜 기준으로 표시
+  const raw = String(isoDate ?? '');
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw) && !raw.includes('T')) {
+    const [y, m, d] = raw.slice(0, 10).split('-');
+    return `${y}.${m}.${d}`;
+  }
+  const parsed = new Date(raw);
+  if (!Number.isNaN(parsed.getTime())) {
+    const y = parsed.getFullYear();
+    const m = String(parsed.getMonth() + 1).padStart(2, '0');
+    const d = String(parsed.getDate()).padStart(2, '0');
+    return `${y}.${m}.${d}`;
+  }
+  return raw;
 }
 
 function showAlert(title: string, message: string) {
@@ -50,7 +62,7 @@ export default function AttendanceScreen() {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createVisible, setCreateVisible] = useState(false);
   const [title, setTitle] = useState('정기 모임');
-  const [place, setPlace] = useState('');
+  const [place, setPlace] = useState('일광초등학교');
   const [sessionDate, setSessionDate] = useState(todayIsoDate());
   const [memberSearch, setMemberSearch] = useState('');
 
@@ -128,7 +140,7 @@ export default function AttendanceScreen() {
 
   function openCreate() {
     setTitle('정기 모임');
-    setPlace('');
+    setPlace('일광초등학교');
     setSessionDate(todayIsoDate());
     setCreateVisible(true);
   }
@@ -280,61 +292,66 @@ export default function AttendanceScreen() {
               { paddingBottom: Math.max(insets.bottom, 20) },
             ]}
           >
-            <Text style={styles.modalTitle}>새 모임</Text>
-            <Text style={styles.modalHint}>
-              sessions 테이블에 저장됩니다
-            </Text>
+            <ScrollView
+              keyboardShouldPersistTaps="handled"
+              showsVerticalScrollIndicator={false}
+            >
+              <Text style={styles.modalTitle}>새 모임</Text>
+              <Text style={styles.modalHint}>
+                sessions 테이블에 저장됩니다
+              </Text>
 
-            <Text style={styles.fieldLabel}>날짜 (YYYY-MM-DD)</Text>
-            <TextInput
-              style={styles.input}
-              value={sessionDate}
-              onChangeText={setSessionDate}
-              placeholder="2026-10-28"
-              placeholderTextColor={colors.textSecondary}
-              autoCapitalize="none"
-            />
+              <Text style={styles.fieldLabel}>날짜</Text>
+              <Text style={styles.dateSelected}>
+                {formatDisplayDate(sessionDate)}
+              </Text>
+              <MonthCalendar
+                key={createVisible ? 'open' : 'closed'}
+                value={sessionDate}
+                onChange={setSessionDate}
+              />
 
-            <Text style={[styles.fieldLabel, styles.fieldSpaced]}>제목</Text>
-            <TextInput
-              style={styles.input}
-              value={title}
-              onChangeText={setTitle}
-              placeholder="정기 모임"
-              placeholderTextColor={colors.textSecondary}
-            />
+              <Text style={[styles.fieldLabel, styles.fieldSpaced]}>제목</Text>
+              <TextInput
+                style={styles.input}
+                value={title}
+                onChangeText={setTitle}
+                placeholder="정기 모임"
+                placeholderTextColor={colors.textSecondary}
+              />
 
-            <Text style={[styles.fieldLabel, styles.fieldSpaced]}>장소</Text>
-            <TextInput
-              style={styles.input}
-              value={place}
-              onChangeText={setPlace}
-              placeholder="선택 입력"
-              placeholderTextColor={colors.textSecondary}
-            />
+              <Text style={[styles.fieldLabel, styles.fieldSpaced]}>장소</Text>
+              <TextInput
+                style={styles.input}
+                value={place}
+                onChangeText={setPlace}
+                placeholder="일광초등학교"
+                placeholderTextColor={colors.textSecondary}
+              />
 
-            <View style={styles.modalActions}>
-              <Pressable
-                style={styles.cancelBtn}
-                onPress={() => setCreateVisible(false)}
-              >
-                <Text style={styles.cancelText}>취소</Text>
-              </Pressable>
-              <Pressable
-                style={[
-                  styles.saveBtn,
-                  createMutation.isPending && styles.disabled,
-                ]}
-                disabled={createMutation.isPending}
-                onPress={submitCreate}
-              >
-                {createMutation.isPending ? (
-                  <ActivityIndicator color={colors.white} />
-                ) : (
-                  <Text style={styles.saveText}>만들기</Text>
-                )}
-              </Pressable>
-            </View>
+              <View style={styles.modalActions}>
+                <Pressable
+                  style={styles.cancelBtn}
+                  onPress={() => setCreateVisible(false)}
+                >
+                  <Text style={styles.cancelText}>취소</Text>
+                </Pressable>
+                <Pressable
+                  style={[
+                    styles.saveBtn,
+                    createMutation.isPending && styles.disabled,
+                  ]}
+                  disabled={createMutation.isPending}
+                  onPress={submitCreate}
+                >
+                  {createMutation.isPending ? (
+                    <ActivityIndicator color={colors.white} />
+                  ) : (
+                    <Text style={styles.saveText}>만들기</Text>
+                  )}
+                </Pressable>
+              </View>
+            </ScrollView>
           </View>
         </View>
       </Modal>
@@ -632,6 +649,7 @@ const styles = StyleSheet.create({
     borderTopLeftRadius: 20,
     borderTopRightRadius: 20,
     padding: spacing.lg,
+    maxHeight: '92%',
   },
   modalTitle: {
     fontFamily: fonts.bodyBold,
@@ -650,6 +668,12 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
     marginBottom: 6,
+  },
+  dateSelected: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 16,
+    color: colors.primary,
+    marginBottom: spacing.sm,
   },
   fieldSpaced: {
     marginTop: 12,

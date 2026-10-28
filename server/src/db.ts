@@ -1,9 +1,13 @@
 import dotenv from 'dotenv';
 import path from 'path';
-import { Pool } from 'pg';
+import { Pool, types } from 'pg';
 
 // Pool 생성 전에 .env 를 먼저 로드해야 비밀번호가 undefined 가 되지 않습니다.
 dotenv.config({ path: path.resolve(__dirname, '../.env') });
+
+// DATE를 JS Date로 파싱하지 않음.
+// Date → JSON(ISO UTC) 변환 시 타임존 때문에 날짜가 하루 당겨지는 문제를 막습니다.
+types.setTypeParser(types.builtins.DATE, (value) => value);
 
 /**
  * PostgreSQL 연결 풀
