@@ -1,0 +1,25 @@
+# Dependencies
+node_modules/
+
+# Env (비밀번호 포함 — 커밋 금지)
+server/.env
+mobile/.env
+
+# Build
+server/dist/
+mobile/dist/
+*.tsbuildinfo
+
+# Expo
+mobile/.expo/
+mobile/web-build/
+
+# OS / IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*

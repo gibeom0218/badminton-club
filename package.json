@@ -1,0 +1,12 @@
+{
+  "name": "badminton-club",
+  "version": "1.0.0",
+  "private": true,
+  "description": "배드민턴 동호회 관리 MVP (Expo + Express + PostgreSQL)",
+  "scripts": {
+    "dev:server": "npm run dev --prefix server",
+    "dev:mobile": "npm start --prefix mobile",
+    "install:all": "npm install --prefix server && npm install --prefix mobile",
+    "typecheck:server": "npm run typecheck --prefix server"
+  }
+}
