@@ -26,13 +26,24 @@ function parseGender(value: unknown): '남' | '여' | null | 'invalid' {
   return 'invalid';
 }
 
-// GET /api/members — 회원 목록
+// GET /api/members — 회원 목록 (공통 즐겨찾기 우선)
 router.get('/', async (_req, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, name, age, grade, gender, wins, losses, created_at
-       FROM public.members
-       ORDER BY name ASC`,
+      `SELECT
+         m.id,
+         m.name,
+         m.age,
+         m.grade,
+         m.gender,
+         m.wins,
+         m.losses,
+         m.created_at,
+         (f.id IS NOT NULL) AS is_favorite
+       FROM public.members m
+       LEFT JOIN public.favorites f
+         ON f.member_id = m.id AND f.user_id IS NULL
+       ORDER BY (f.id IS NOT NULL) DESC, m.name ASC`,
     );
     res.json(result.rows);
   } catch (err) {
@@ -77,7 +88,7 @@ router.post('/', async (req, res) => {
        RETURNING id, name, age, grade, gender, wins, losses, created_at`,
       [name, age, grade, gender],
     );
-    res.status(201).json(result.rows[0]);
+    res.status(201).json({ ...result.rows[0], is_favorite: false });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '회원 등록에 실패했습니다.' });
@@ -136,10 +147,81 @@ router.put('/:id', async (req, res) => {
       return;
     }
 
-    res.json(result.rows[0]);
+    const fav = await pool.query(
+      `SELECT 1 FROM public.favorites
+       WHERE member_id = $1 AND user_id IS NULL`,
+      [id],
+    );
+    res.json({
+      ...result.rows[0],
+      is_favorite: (fav.rowCount ?? 0) > 0,
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: '회원 수정에 실패했습니다.' });
+  }
+});
+
+// POST /api/members/:id/favorite — 공통 즐겨찾기 추가 (user_id NULL)
+router.post('/:id/favorite', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: '유효한 회원 id가 필요합니다.' });
+      return;
+    }
+
+    const memberCheck = await pool.query(
+      `SELECT id FROM public.members WHERE id = $1`,
+      [id],
+    );
+    if (memberCheck.rowCount === 0) {
+      res.status(404).json({ error: '회원을 찾을 수 없습니다.' });
+      return;
+    }
+
+    const existing = await pool.query(
+      `SELECT id FROM public.favorites
+       WHERE member_id = $1 AND user_id IS NULL`,
+      [id],
+    );
+
+    if ((existing.rowCount ?? 0) === 0) {
+      await pool.query(
+        `INSERT INTO public.favorites (user_id, member_id)
+         VALUES (NULL, $1)`,
+        [id],
+      );
+      res.status(201).json({ member_id: id, is_favorite: true });
+      return;
+    }
+
+    res.status(200).json({ member_id: id, is_favorite: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '즐겨찾기 추가에 실패했습니다.' });
+  }
+});
+
+// DELETE /api/members/:id/favorite — 공통 즐겨찾기 해제
+router.delete('/:id/favorite', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: '유효한 회원 id가 필요합니다.' });
+      return;
+    }
+
+    await pool.query(
+      `DELETE FROM public.favorites
+       WHERE member_id = $1 AND user_id IS NULL`,
+      [id],
+    );
+
+    res.json({ member_id: id, is_favorite: false });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '즐겨찾기 해제에 실패했습니다.' });
   }
 });
 

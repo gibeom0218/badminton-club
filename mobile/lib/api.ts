@@ -66,6 +66,18 @@ export const api = {
   deleteMember: (id: number) =>
     request<void>(`/api/members/${id}`, { method: 'DELETE' }),
 
+  addFavorite: (id: number) =>
+    request<{ member_id: number; is_favorite: boolean }>(
+      `/api/members/${id}/favorite`,
+      { method: 'POST' },
+    ),
+
+  removeFavorite: (id: number) =>
+    request<{ member_id: number; is_favorite: boolean }>(
+      `/api/members/${id}/favorite`,
+      { method: 'DELETE' },
+    ),
+
   getMemberAttendances: (id: number) =>
     request<MemberAttendance[]>(`/api/members/${id}/attendances`),
 

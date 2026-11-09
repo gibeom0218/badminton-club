@@ -1,3 +1,4 @@
+import FontAwesome from '@expo/vector-icons/FontAwesome';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import { useEffect, useMemo, useState } from 'react';
@@ -159,6 +160,22 @@ export default function HomeScreen() {
     onError: (err: Error) => showAlert('삭제 실패', err.message),
   });
 
+  const favoriteMutation = useMutation({
+    mutationFn: ({ id, next }: { id: number; next: boolean }) =>
+      next ? api.addFavorite(id) : api.removeFavorite(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['members'] });
+    },
+    onError: (err: Error) => showAlert('즐겨찾기 실패', err.message),
+  });
+
+  function toggleFavorite(member: Member) {
+    favoriteMutation.mutate({
+      id: member.id,
+      next: !member.is_favorite,
+    });
+  }
+
   const members = membersQuery.data ?? [];
   const selectedMember =
     selectedMemberId == null
@@ -166,8 +183,15 @@ export default function HomeScreen() {
       : (members.find((m) => m.id === selectedMemberId) ?? null);
   const filteredMembers = useMemo(() => {
     const q = search.trim().toLowerCase();
-    if (!q) return members;
-    return members.filter((m) => m.name.toLowerCase().includes(q));
+    const list = q
+      ? members.filter((m) => m.name.toLowerCase().includes(q))
+      : members;
+    return [...list].sort((a, b) => {
+      const aFav = a.is_favorite ? 0 : 1;
+      const bFav = b.is_favorite ? 0 : 1;
+      if (aFav !== bFav) return aFav - bFav;
+      return a.name.localeCompare(b.name, 'ko');
+    });
   }, [members, search]);
 
   const heroOpacity = useSharedValue(0);
@@ -271,7 +295,14 @@ export default function HomeScreen() {
             deleteMutation.isPending &&
             deleteMutation.variables === selectedMemberId
           }
+          favoriting={
+            favoriteMutation.isPending &&
+            favoriteMutation.variables?.id === selectedMemberId
+          }
           onBack={() => setSelectedMemberId(null)}
+          onToggleFavorite={() => {
+            if (selectedMember) toggleFavorite(selectedMember);
+          }}
           onEdit={() => {
             if (selectedMember) openEdit(selectedMember);
           }}
@@ -500,7 +531,12 @@ export default function HomeScreen() {
                   deleteMutation.isPending &&
                   deleteMutation.variables === item.id
                 }
+                favoriting={
+                  favoriteMutation.isPending &&
+                  favoriteMutation.variables?.id === item.id
+                }
                 onPress={() => setSelectedMemberId(item.id)}
+                onToggleFavorite={() => toggleFavorite(item)}
                 onEdit={() => openEdit(item)}
                 onDelete={() => confirmDelete(item)}
               />
@@ -634,7 +670,9 @@ function MemberDetailView({
   loading,
   error,
   deleting,
+  favoriting,
   onBack,
+  onToggleFavorite,
   onEdit,
   onDelete,
   onRefresh,
@@ -649,7 +687,9 @@ function MemberDetailView({
   loading: boolean;
   error?: string;
   deleting: boolean;
+  favoriting: boolean;
   onBack: () => void;
+  onToggleFavorite: () => void;
   onEdit: () => void;
   onDelete: () => void;
   onRefresh: () => void;
@@ -676,10 +716,24 @@ function MemberDetailView({
 
         {member ? (
           <>
-            <View style={styles.detailAvatar}>
-              <Text style={styles.detailAvatarText}>
-                {member.name.slice(0, 1)}
-              </Text>
+            <View style={styles.detailNameRow}>
+              <View style={styles.detailAvatar}>
+                <Text style={styles.detailAvatarText}>
+                  {member.name.slice(0, 1)}
+                </Text>
+              </View>
+              <Pressable
+                style={styles.detailStarBtn}
+                onPress={onToggleFavorite}
+                disabled={favoriting}
+                hitSlop={8}
+              >
+                <FontAwesome
+                  name={member.is_favorite ? 'star' : 'star-o'}
+                  size={26}
+                  color={member.is_favorite ? colors.lime : colors.textOnDarkMuted}
+                />
+              </Pressable>
             </View>
             <Text style={styles.detailName}>{member.name}</Text>
             <Text style={styles.detailSub}>
@@ -687,6 +741,7 @@ function MemberDetailView({
                 member.gender,
                 member.age != null ? `${member.age}세` : null,
                 member.grade?.trim() || null,
+                member.is_favorite ? '즐겨찾기' : null,
               ]
                 .filter(Boolean)
                 .join(' · ') || '기본 정보 없음'}
@@ -813,14 +868,18 @@ function MemberRow({
   member,
   index,
   deleting,
+  favoriting,
   onPress,
+  onToggleFavorite,
   onEdit,
   onDelete,
 }: {
   member: Member;
   index: number;
   deleting: boolean;
+  favoriting: boolean;
   onPress: () => void;
+  onToggleFavorite: () => void;
   onEdit: () => void;
   onDelete: () => void;
 }) {
@@ -839,6 +898,28 @@ function MemberRow({
           <Text style={styles.name}>{member.name}</Text>
           <Text style={styles.meta}>{formatMemberMeta(member)}</Text>
         </View>
+        <Pressable
+          accessibilityRole="button"
+          accessibilityLabel={
+            member.is_favorite ? '즐겨찾기 해제' : '즐겨찾기 추가'
+          }
+          style={({ pressed }) => [
+            styles.starBtn,
+            pressed && styles.actionPressed,
+          ]}
+          onPress={(e) => {
+            e?.stopPropagation?.();
+            onToggleFavorite();
+          }}
+          disabled={favoriting}
+          hitSlop={8}
+        >
+          <FontAwesome
+            name={member.is_favorite ? 'star' : 'star-o'}
+            size={18}
+            color={member.is_favorite ? '#E6B422' : colors.textSecondary}
+          />
+        </Pressable>
         <Pressable
           accessibilityRole="button"
           style={({ pressed }) => [
@@ -1149,6 +1230,12 @@ const styles = StyleSheet.create({
     color: colors.lime,
     fontSize: 14,
   },
+  detailNameRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
   detailAvatar: {
     width: 72,
     height: 72,
@@ -1158,7 +1245,23 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(184, 224, 106, 0.45)',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+  },
+  detailStarBtn: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  starBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginRight: 4,
+    ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null),
   },
   detailAvatarText: {
     fontFamily: fonts.bodyBold,

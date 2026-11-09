@@ -8,6 +8,7 @@ export interface Member {
   gender: Gender | null;
   wins: number;
   losses: number;
+  is_favorite: boolean;
   created_at: string;
 }
 

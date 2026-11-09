@@ -35,6 +35,8 @@ async function main(): Promise<void> {
           update: 'PUT /api/members/:id',
           remove: 'DELETE /api/members/:id',
           attendances: 'GET /api/members/:id/attendances',
+          addFavorite: 'POST /api/members/:id/favorite',
+          removeFavorite: 'DELETE /api/members/:id/favorite',
         },
         sessions: {
           list: 'GET /api/sessions',
