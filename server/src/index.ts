@@ -34,6 +34,7 @@ async function main(): Promise<void> {
           create: 'POST /api/members',
           update: 'PUT /api/members/:id',
           remove: 'DELETE /api/members/:id',
+          attendances: 'GET /api/members/:id/attendances',
         },
         sessions: {
           list: 'GET /api/sessions',

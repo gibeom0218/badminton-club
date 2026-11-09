@@ -143,6 +143,43 @@ router.put('/:id', async (req, res) => {
   }
 });
 
+// GET /api/members/:id/attendances — 회원 출석 이력 (잔디용)
+router.get('/:id/attendances', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: '유효한 회원 id가 필요합니다.' });
+      return;
+    }
+
+    const memberCheck = await pool.query(
+      `SELECT id FROM public.members WHERE id = $1`,
+      [id],
+    );
+    if (memberCheck.rowCount === 0) {
+      res.status(404).json({ error: '회원을 찾을 수 없습니다.' });
+      return;
+    }
+
+    const result = await pool.query(
+      `SELECT
+         a.session_id,
+         s.session_date,
+         s.title
+       FROM public.attendances a
+       JOIN public.sessions s ON s.id = a.session_id
+       WHERE a.member_id = $1
+       ORDER BY s.session_date DESC, a.session_id DESC`,
+      [id],
+    );
+
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '출석 이력 조회에 실패했습니다.' });
+  }
+});
+
 // DELETE /api/members/:id — 회원 삭제
 router.delete('/:id', async (req, res) => {
   try {

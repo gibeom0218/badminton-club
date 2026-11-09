@@ -131,6 +131,7 @@ export default function AttendanceScreen() {
     }) => api.addAttendance(sessionId, memberId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['members'] });
       if (selectedId != null) {
         queryClient.invalidateQueries({ queryKey: ['sessions', selectedId] });
       }
@@ -148,6 +149,7 @@ export default function AttendanceScreen() {
     }) => api.removeAttendance(sessionId, memberId),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['sessions'] });
+      queryClient.invalidateQueries({ queryKey: ['members'] });
       if (selectedId != null) {
         queryClient.invalidateQueries({ queryKey: ['sessions', selectedId] });
       }

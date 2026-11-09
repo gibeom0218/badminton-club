@@ -2,6 +2,7 @@ import type {
   Match,
   MatchInput,
   Member,
+  MemberAttendance,
   MemberInput,
   Session,
   SessionInput,
@@ -64,6 +65,9 @@ export const api = {
 
   deleteMember: (id: number) =>
     request<void>(`/api/members/${id}`, { method: 'DELETE' }),
+
+  getMemberAttendances: (id: number) =>
+    request<MemberAttendance[]>(`/api/members/${id}/attendances`),
 
   getSessions: () => request<Session[]>('/api/sessions'),
 

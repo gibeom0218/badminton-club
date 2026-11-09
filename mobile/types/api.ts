@@ -18,6 +18,12 @@ export interface MemberInput {
   gender?: Gender | null;
 }
 
+export interface MemberAttendance {
+  session_id: number;
+  session_date: string;
+  title: string;
+}
+
 export interface Session {
   id: number;
   session_date: string;
