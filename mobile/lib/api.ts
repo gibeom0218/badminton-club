@@ -100,6 +100,12 @@ export const api = {
       body: JSON.stringify(payload),
     }),
 
+  updateMatch: (sessionId: number, matchId: number, payload: MatchInput) =>
+    request<Match>(`/api/sessions/${sessionId}/matches/${matchId}`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
+    }),
+
   deleteMatch: (sessionId: number, matchId: number) =>
     request<void>(`/api/sessions/${sessionId}/matches/${matchId}`, {
       method: 'DELETE',

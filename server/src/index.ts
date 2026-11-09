@@ -44,6 +44,7 @@ async function main(): Promise<void> {
           unattend: 'DELETE /api/sessions/:id/attendances/:memberId',
           matches: 'GET /api/sessions/:id/matches',
           createMatch: 'POST /api/sessions/:id/matches',
+          updateMatch: 'PUT /api/sessions/:id/matches/:matchId',
           deleteMatch: 'DELETE /api/sessions/:id/matches/:matchId',
         },
       },

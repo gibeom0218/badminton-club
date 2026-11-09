@@ -69,6 +69,7 @@ export default function AttendanceScreen() {
     'attendance',
   );
   const [matchModalVisible, setMatchModalVisible] = useState(false);
+  const [editingMatchId, setEditingMatchId] = useState<number | null>(null);
   const [teamA1, setTeamA1] = useState<number | null>(null);
   const [teamA2, setTeamA2] = useState<number | null>(null);
   const [teamB1, setTeamB1] = useState<number | null>(null);
@@ -157,14 +158,19 @@ export default function AttendanceScreen() {
     onError: (err: Error) => showAlert('출석 해제 실패', err.message),
   });
 
-  const createMatchMutation = useMutation({
+  const saveMatchMutation = useMutation({
     mutationFn: ({
       sessionId,
+      matchId,
       payload,
     }: {
       sessionId: number;
+      matchId: number | null;
       payload: Parameters<typeof api.createMatch>[1];
-    }) => api.createMatch(sessionId, payload),
+    }) =>
+      matchId == null
+        ? api.createMatch(sessionId, payload)
+        : api.updateMatch(sessionId, matchId, payload),
     onSuccess: () => {
       if (selectedId != null) {
         queryClient.invalidateQueries({
@@ -174,7 +180,11 @@ export default function AttendanceScreen() {
       queryClient.invalidateQueries({ queryKey: ['members'] });
       closeMatchModal();
     },
-    onError: (err: Error) => showAlert('경기 등록 실패', err.message),
+    onError: (err: Error) =>
+      showAlert(
+        editingMatchId == null ? '경기 등록 실패' : '경기 수정 실패',
+        err.message,
+      ),
   });
 
   const deleteMatchMutation = useMutation({
@@ -268,6 +278,7 @@ export default function AttendanceScreen() {
   }
 
   function openMatchModal() {
+    setEditingMatchId(null);
     setTeamA1(null);
     setTeamA2(null);
     setTeamB1(null);
@@ -279,8 +290,22 @@ export default function AttendanceScreen() {
     setMatchModalVisible(true);
   }
 
+  function openEditMatch(match: Match) {
+    setEditingMatchId(match.id);
+    setTeamA1(match.team_a_player1);
+    setTeamA2(match.team_a_player2);
+    setTeamB1(match.team_b_player1);
+    setTeamB2(match.team_b_player2);
+    setScoreA(String(match.score_a));
+    setScoreB(String(match.score_b));
+    setPickingSlot(null);
+    setPlayerSearch('');
+    setMatchModalVisible(true);
+  }
+
   function closeMatchModal() {
     setMatchModalVisible(false);
+    setEditingMatchId(null);
     setPickingSlot(null);
     setPlayerSearch('');
   }
@@ -341,8 +366,9 @@ export default function AttendanceScreen() {
       showAlert('안내', '동점은 등록할 수 없습니다.');
       return;
     }
-    createMatchMutation.mutate({
+    saveMatchMutation.mutate({
       sessionId: selectedId,
+      matchId: editingMatchId,
       payload: {
         team_a_player1: teamA1,
         team_a_player2: teamA2,
@@ -409,6 +435,7 @@ export default function AttendanceScreen() {
             removeAttendanceMutation.isPending
           }
           onOpenMatchModal={openMatchModal}
+          onEditMatch={openEditMatch}
           onDeleteMatch={confirmDeleteMatch}
           deletingMatch={deleteMatchMutation.isPending}
           onBack={() => {
@@ -447,7 +474,9 @@ export default function AttendanceScreen() {
                 keyboardShouldPersistTaps="handled"
                 showsVerticalScrollIndicator={false}
               >
-                <Text style={styles.modalTitle}>경기 등록</Text>
+                <Text style={styles.modalTitle}>
+                  {editingMatchId == null ? '경기 등록' : '경기 수정'}
+                </Text>
                 <Text style={styles.modalHint}>
                   출석한 회원만 선택할 수 있습니다 (2 vs 2)
                 </Text>
@@ -548,20 +577,22 @@ export default function AttendanceScreen() {
                   <Pressable
                     style={[
                       styles.saveBtn,
-                      (createMatchMutation.isPending ||
+                      (saveMatchMutation.isPending ||
                         attendedMembers.length < 4) &&
                         styles.disabled,
                     ]}
                     disabled={
-                      createMatchMutation.isPending ||
+                      saveMatchMutation.isPending ||
                       attendedMembers.length < 4
                     }
                     onPress={submitMatch}
                   >
-                    {createMatchMutation.isPending ? (
+                    {saveMatchMutation.isPending ? (
                       <ActivityIndicator color={colors.white} />
                     ) : (
-                      <Text style={styles.saveText}>등록</Text>
+                      <Text style={styles.saveText}>
+                        {editingMatchId == null ? '등록' : '저장'}
+                      </Text>
                     )}
                   </Pressable>
                 </View>
@@ -861,6 +892,7 @@ function SessionDetailView({
   onToggle,
   toggling,
   onOpenMatchModal,
+  onEditMatch,
   onDeleteMatch,
   deletingMatch,
   onBack,
@@ -883,6 +915,7 @@ function SessionDetailView({
   onToggle: (memberId: number) => void;
   toggling: boolean;
   onOpenMatchModal: () => void;
+  onEditMatch: (match: Match) => void;
   onDeleteMatch: (match: Match) => void;
   deletingMatch: boolean;
   onBack: () => void;
@@ -1129,13 +1162,21 @@ function SessionDetailView({
                         <Text style={styles.matchScore}>
                           {item.score_a}:{item.score_b}
                         </Text>
-                        <Pressable
-                          disabled={deletingMatch}
-                          onPress={() => onDeleteMatch(item)}
-                          hitSlop={8}
-                        >
-                          <Text style={styles.matchDelete}>삭제</Text>
-                        </Pressable>
+                        <View style={styles.matchActions}>
+                          <Pressable
+                            onPress={() => onEditMatch(item)}
+                            hitSlop={8}
+                          >
+                            <Text style={styles.matchEdit}>수정</Text>
+                          </Pressable>
+                          <Pressable
+                            disabled={deletingMatch}
+                            onPress={() => onDeleteMatch(item)}
+                            hitSlop={8}
+                          >
+                            <Text style={styles.matchDelete}>삭제</Text>
+                          </Pressable>
+                        </View>
                       </View>
                     </View>
                   );
@@ -1501,8 +1542,18 @@ const styles = StyleSheet.create({
     color: colors.primary,
     lineHeight: 30,
   },
-  matchDelete: {
+  matchActions: {
     marginTop: 4,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+  },
+  matchEdit: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 12,
+    color: colors.primary,
+  },
+  matchDelete: {
     fontFamily: fonts.bodyMedium,
     fontSize: 12,
     color: colors.danger,

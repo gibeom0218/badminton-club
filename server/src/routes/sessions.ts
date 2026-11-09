@@ -384,16 +384,17 @@ router.post('/:id/matches', async (req, res) => {
       [sessionId, teamA1, teamA2, teamB1, teamB2, scoreA, scoreB, note],
     );
 
-    const winnerIds = scoreA > scoreB ? [teamA1, teamA2] : [teamB1, teamB2];
-    const loserIds = scoreA > scoreB ? [teamB1, teamB2] : [teamA1, teamA2];
-
-    await client.query(
-      `UPDATE public.members SET wins = wins + 1 WHERE id = ANY($1::int[])`,
-      [winnerIds],
-    );
-    await client.query(
-      `UPDATE public.members SET losses = losses + 1 WHERE id = ANY($1::int[])`,
-      [loserIds],
+    await applyMatchStats(
+      client,
+      {
+        team_a_player1: teamA1,
+        team_a_player2: teamA2,
+        team_b_player1: teamB1,
+        team_b_player2: teamB2,
+        score_a: scoreA,
+        score_b: scoreB,
+      },
+      1,
     );
 
     const matchId = insertResult.rows[0].id as number;
@@ -414,6 +415,204 @@ router.post('/:id/matches', async (req, res) => {
     }
     console.error(err);
     res.status(500).json({ error: '경기 등록에 실패했습니다.' });
+  } finally {
+    client.release();
+  }
+});
+
+type MatchPlayers = {
+  team_a_player1: number;
+  team_a_player2: number;
+  team_b_player1: number;
+  team_b_player2: number;
+  score_a: number;
+  score_b: number;
+};
+
+async function applyMatchStats(
+  client: { query: typeof pool.query },
+  match: MatchPlayers,
+  direction: 1 | -1,
+): Promise<void> {
+  const winnerIds =
+    match.score_a > match.score_b
+      ? [match.team_a_player1, match.team_a_player2]
+      : [match.team_b_player1, match.team_b_player2];
+  const loserIds =
+    match.score_a > match.score_b
+      ? [match.team_b_player1, match.team_b_player2]
+      : [match.team_a_player1, match.team_a_player2];
+
+  if (direction === 1) {
+    await client.query(
+      `UPDATE public.members SET wins = wins + 1 WHERE id = ANY($1::int[])`,
+      [winnerIds],
+    );
+    await client.query(
+      `UPDATE public.members SET losses = losses + 1 WHERE id = ANY($1::int[])`,
+      [loserIds],
+    );
+    return;
+  }
+
+  await client.query(
+    `UPDATE public.members
+     SET wins = GREATEST(wins - 1, 0)
+     WHERE id = ANY($1::int[])`,
+    [winnerIds],
+  );
+  await client.query(
+    `UPDATE public.members
+     SET losses = GREATEST(losses - 1, 0)
+     WHERE id = ANY($1::int[])`,
+    [loserIds],
+  );
+}
+
+// PUT /api/sessions/:id/matches/:matchId — 경기 수정 (+ 승패 재반영)
+router.put('/:id/matches/:matchId', async (req, res) => {
+  const client = await pool.connect();
+  try {
+    const sessionId = Number(req.params.id);
+    const matchId = Number(req.params.matchId);
+    const teamA1 = parsePositiveInt(req.body?.team_a_player1);
+    const teamA2 = parsePositiveInt(req.body?.team_a_player2);
+    const teamB1 = parsePositiveInt(req.body?.team_b_player1);
+    const teamB2 = parsePositiveInt(req.body?.team_b_player2);
+    const scoreA = parseScore(req.body?.score_a);
+    const scoreB = parseScore(req.body?.score_b);
+    const note = parseOptionalText(req.body?.note, 500);
+
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      res.status(400).json({ error: '유효한 모임 id가 필요합니다.' });
+      return;
+    }
+    if (!Number.isInteger(matchId) || matchId <= 0) {
+      res.status(400).json({ error: '유효한 경기 id가 필요합니다.' });
+      return;
+    }
+    if (teamA1 == null || teamA2 == null || teamB1 == null || teamB2 == null) {
+      res.status(400).json({ error: '선수 4명을 모두 선택하세요.' });
+      return;
+    }
+    if (scoreA == null || scoreB == null) {
+      res.status(400).json({ error: '점수는 0~99 사이 정수여야 합니다.' });
+      return;
+    }
+    if (scoreA === scoreB) {
+      res.status(400).json({ error: '동점은 등록할 수 없습니다.' });
+      return;
+    }
+    if (note === 'invalid') {
+      res.status(400).json({ error: '메모가 올바르지 않습니다.' });
+      return;
+    }
+
+    const playerIds = [teamA1, teamA2, teamB1, teamB2];
+    if (new Set(playerIds).size !== 4) {
+      res.status(400).json({ error: '같은 회원을 중복 선택할 수 없습니다.' });
+      return;
+    }
+
+    await client.query('BEGIN');
+
+    const matchResult = await client.query(
+      `SELECT id, session_id,
+              team_a_player1, team_a_player2,
+              team_b_player1, team_b_player2,
+              score_a, score_b
+       FROM public.matches
+       WHERE id = $1 AND session_id = $2
+       FOR UPDATE`,
+      [matchId, sessionId],
+    );
+
+    if (matchResult.rowCount === 0) {
+      await client.query('ROLLBACK');
+      res.status(404).json({ error: '경기를 찾을 수 없습니다.' });
+      return;
+    }
+
+    const oldMatch = matchResult.rows[0] as MatchPlayers;
+
+    const memberCheck = await client.query(
+      `SELECT id FROM public.members WHERE id = ANY($1::int[])`,
+      [playerIds],
+    );
+    if (memberCheck.rowCount !== 4) {
+      await client.query('ROLLBACK');
+      res.status(400).json({ error: '존재하지 않는 회원이 포함되어 있습니다.' });
+      return;
+    }
+
+    const attendCheck = await client.query(
+      `SELECT member_id FROM public.attendances
+       WHERE session_id = $1 AND member_id = ANY($2::int[])`,
+      [sessionId, playerIds],
+    );
+    if (attendCheck.rowCount !== 4) {
+      await client.query('ROLLBACK');
+      res.status(400).json({
+        error: '출석한 회원만 경기에 등록할 수 있습니다.',
+      });
+      return;
+    }
+
+    await applyMatchStats(client, oldMatch, -1);
+
+    await client.query(
+      `UPDATE public.matches
+       SET team_a_player1 = $1,
+           team_a_player2 = $2,
+           team_b_player1 = $3,
+           team_b_player2 = $4,
+           score_a = $5,
+           score_b = $6,
+           note = $7
+       WHERE id = $8 AND session_id = $9`,
+      [
+        teamA1,
+        teamA2,
+        teamB1,
+        teamB2,
+        scoreA,
+        scoreB,
+        note,
+        matchId,
+        sessionId,
+      ],
+    );
+
+    await applyMatchStats(
+      client,
+      {
+        team_a_player1: teamA1,
+        team_a_player2: teamA2,
+        team_b_player1: teamB1,
+        team_b_player2: teamB2,
+        score_a: scoreA,
+        score_b: scoreB,
+      },
+      1,
+    );
+
+    const detail = await client.query(
+      `SELECT ${MATCH_SELECT}
+       ${MATCH_JOINS}
+       WHERE m.id = $1`,
+      [matchId],
+    );
+
+    await client.query('COMMIT');
+    res.json(detail.rows[0]);
+  } catch (err) {
+    try {
+      await client.query('ROLLBACK');
+    } catch {
+      /* ignore */
+    }
+    console.error(err);
+    res.status(500).json({ error: '경기 수정에 실패했습니다.' });
   } finally {
     client.release();
   }
@@ -454,37 +653,8 @@ router.delete('/:id/matches/:matchId', async (req, res) => {
       return;
     }
 
-    const match = matchResult.rows[0] as {
-      team_a_player1: number;
-      team_a_player2: number;
-      team_b_player1: number;
-      team_b_player2: number;
-      score_a: number;
-      score_b: number;
-    };
-
-    const winnerIds =
-      match.score_a > match.score_b
-        ? [match.team_a_player1, match.team_a_player2]
-        : [match.team_b_player1, match.team_b_player2];
-    const loserIds =
-      match.score_a > match.score_b
-        ? [match.team_b_player1, match.team_b_player2]
-        : [match.team_a_player1, match.team_a_player2];
-
-    await client.query(
-      `UPDATE public.members
-       SET wins = GREATEST(wins - 1, 0)
-       WHERE id = ANY($1::int[])`,
-      [winnerIds],
-    );
-    await client.query(
-      `UPDATE public.members
-       SET losses = GREATEST(losses - 1, 0)
-       WHERE id = ANY($1::int[])`,
-      [loserIds],
-    );
-
+    const match = matchResult.rows[0] as MatchPlayers;
+    await applyMatchStats(client, match, -1);
     await client.query(`DELETE FROM public.matches WHERE id = $1`, [matchId]);
     await client.query('COMMIT');
     res.status(204).send();
