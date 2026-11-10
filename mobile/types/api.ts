@@ -1,5 +1,18 @@
 export type Gender = '남' | '여';
 
+export type UserRole = 'admin' | 'user';
+
+export interface AuthUser {
+  id: number;
+  username: string;
+  role: UserRole;
+}
+
+export interface LoginResponse {
+  token: string;
+  user: AuthUser;
+}
+
 export interface Member {
   id: number;
   name: string;

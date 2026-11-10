@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireAdmin } from '../auth';
 import { pool } from '../db';
 
 const router = Router();
@@ -48,7 +49,7 @@ router.get('/', async (_req, res) => {
 });
 
 // POST /api/sessions — 모임 생성
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   try {
     const sessionDate = parseSessionDate(req.body?.session_date);
     const title = parseOptionalText(req.body?.title, 100);
@@ -137,7 +138,7 @@ router.get('/:id', async (req, res) => {
 });
 
 // POST /api/sessions/:id/attendances — 출석 체크
-router.post('/:id/attendances', async (req, res) => {
+router.post('/:id/attendances', requireAdmin, async (req, res) => {
   try {
     const sessionId = Number(req.params.id);
     const memberId = Number(req.body?.member_id);
@@ -195,7 +196,7 @@ router.post('/:id/attendances', async (req, res) => {
 });
 
 // DELETE /api/sessions/:id/attendances/:memberId — 출석 해제
-router.delete('/:id/attendances/:memberId', async (req, res) => {
+router.delete('/:id/attendances/:memberId', requireAdmin, async (req, res) => {
   try {
     const sessionId = Number(req.params.id);
     const memberId = Number(req.params.memberId);
@@ -298,7 +299,7 @@ router.get('/:id/matches', async (req, res) => {
 });
 
 // POST /api/sessions/:id/matches — 경기 등록 (+ 승패 반영)
-router.post('/:id/matches', async (req, res) => {
+router.post('/:id/matches', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const sessionId = Number(req.params.id);
@@ -470,7 +471,7 @@ async function applyMatchStats(
 }
 
 // PUT /api/sessions/:id/matches/:matchId — 경기 수정 (+ 승패 재반영)
-router.put('/:id/matches/:matchId', async (req, res) => {
+router.put('/:id/matches/:matchId', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const sessionId = Number(req.params.id);
@@ -619,7 +620,7 @@ router.put('/:id/matches/:matchId', async (req, res) => {
 });
 
 // DELETE /api/sessions/:id/matches/:matchId — 경기 삭제 (+ 승패 되돌리기)
-router.delete('/:id/matches/:matchId', async (req, res) => {
+router.delete('/:id/matches/:matchId', requireAdmin, async (req, res) => {
   const client = await pool.connect();
   try {
     const sessionId = Number(req.params.id);

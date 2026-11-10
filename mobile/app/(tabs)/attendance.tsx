@@ -17,11 +17,13 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AccountBadge } from '@/components/ui/AccountBadge';
 import { MonthCalendar } from '@/components/ui/MonthCalendar';
 import { StateView } from '@/components/ui/StateView';
 import { colors, fonts, spacing } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
-import type { Match, Member, Session } from '@/types/api';
+import type { AuthUser, Match, Member, Session } from '@/types/api';
 
 function todayIsoDate(): string {
   const d = new Date();
@@ -59,6 +61,7 @@ function showAlert(title: string, message: string) {
 export default function AttendanceScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { user, isAdmin, logout } = useAuth();
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [createVisible, setCreateVisible] = useState(false);
   const [title, setTitle] = useState('정기 모임');
@@ -267,6 +270,7 @@ export default function AttendanceScreen() {
   }
 
   function toggleAttendance(memberId: number) {
+    if (!isAdmin) return;
     if (selectedId == null || !selected) return;
     const attended = selected.attended_member_ids ?? [];
     const exists = attended.includes(memberId);
@@ -434,10 +438,13 @@ export default function AttendanceScreen() {
             addAttendanceMutation.isPending ||
             removeAttendanceMutation.isPending
           }
+          user={user}
+          isAdmin={isAdmin}
           onOpenMatchModal={openMatchModal}
           onEditMatch={openEditMatch}
           onDeleteMatch={confirmDeleteMatch}
           deletingMatch={deleteMatchMutation.isPending}
+          onLogout={logout}
           onBack={() => {
             setSelectedId(null);
             setMemberSearch('');
@@ -731,12 +738,17 @@ export default function AttendanceScreen() {
         end={{ x: 1, y: 1 }}
         style={[styles.hero, { paddingTop: insets.top + 18 }]}
       >
-        <Text style={styles.eyebrow}>SESSIONS</Text>
+        <AccountBadge user={user} onLogout={logout} />
+        <Text style={[styles.eyebrow, styles.eyebrowSpaced]}>SESSIONS</Text>
         <Text style={styles.brand}>정기 모임</Text>
         <Text style={styles.brandSub}>출석과 경기 결과를 한곳에서 관리하세요</Text>
-        <Pressable style={styles.addBtn} onPress={openCreate}>
-          <Text style={styles.addBtnText}>+ 모임 만들기</Text>
-        </Pressable>
+        <View style={styles.heroActions}>
+          {isAdmin ? (
+            <Pressable style={styles.addBtn} onPress={openCreate}>
+              <Text style={styles.addBtnText}>+ 모임 만들기</Text>
+            </Pressable>
+          ) : null}
+        </View>
       </LinearGradient>
 
       <View style={styles.sheet}>
@@ -793,7 +805,8 @@ export default function AttendanceScreen() {
 
         {!sessionsQuery.isLoading &&
           !sessionsQuery.error &&
-          sessions.length === 0 && (
+          sessions.length === 0 &&
+          isAdmin && (
             <View style={styles.emptyAction}>
               <Pressable style={styles.emptyAddBtn} onPress={openCreate}>
                 <Text style={styles.emptyAddText}>첫 모임 만들기</Text>
@@ -891,10 +904,13 @@ function SessionDetailView({
   onSearchChange,
   onToggle,
   toggling,
+  isAdmin,
   onOpenMatchModal,
   onEditMatch,
   onDeleteMatch,
   deletingMatch,
+  user,
+  onLogout,
   onBack,
   onRefresh,
   refreshing,
@@ -914,10 +930,13 @@ function SessionDetailView({
   onSearchChange: (v: string) => void;
   onToggle: (memberId: number) => void;
   toggling: boolean;
+  isAdmin: boolean;
   onOpenMatchModal: () => void;
   onEditMatch: (match: Match) => void;
   onDeleteMatch: (match: Match) => void;
   deletingMatch: boolean;
+  user: AuthUser | null;
+  onLogout: () => void;
   onBack: () => void;
   onRefresh: () => void;
   refreshing: boolean;
@@ -935,6 +954,9 @@ function SessionDetailView({
         <Pressable style={styles.backBtn} onPress={onBack} hitSlop={8}>
           <Text style={styles.backText}>← 목록</Text>
         </Pressable>
+        <View style={styles.detailBadgeWrap}>
+          <AccountBadge user={user} onLogout={onLogout} />
+        </View>
         {session ? (
           <>
             <Text style={styles.checkDate}>
@@ -1057,7 +1079,7 @@ function SessionDetailView({
                         styles.memberRow,
                         pressed && styles.pressed,
                       ]}
-                      disabled={toggling || !session}
+                      disabled={!isAdmin || toggling || !session}
                       onPress={() => onToggle(item.id)}
                     >
                       <View
@@ -1109,9 +1131,11 @@ function SessionDetailView({
               <Text style={styles.matchCount}>
                 {attendedMembers.length}명 출석 · {matches.length}경기
               </Text>
-              <Pressable style={styles.matchAddBtn} onPress={onOpenMatchModal}>
-                <Text style={styles.matchAddText}>+ 경기 등록</Text>
-              </Pressable>
+              {isAdmin ? (
+                <Pressable style={styles.matchAddBtn} onPress={onOpenMatchModal}>
+                  <Text style={styles.matchAddText}>+ 경기 등록</Text>
+                </Pressable>
+              ) : null}
             </View>
 
             <StateView
@@ -1162,21 +1186,23 @@ function SessionDetailView({
                         <Text style={styles.matchScore}>
                           {item.score_a}:{item.score_b}
                         </Text>
-                        <View style={styles.matchActions}>
-                          <Pressable
-                            onPress={() => onEditMatch(item)}
-                            hitSlop={8}
-                          >
-                            <Text style={styles.matchEdit}>수정</Text>
-                          </Pressable>
-                          <Pressable
-                            disabled={deletingMatch}
-                            onPress={() => onDeleteMatch(item)}
-                            hitSlop={8}
-                          >
-                            <Text style={styles.matchDelete}>삭제</Text>
-                          </Pressable>
-                        </View>
+                        {isAdmin ? (
+                          <View style={styles.matchActions}>
+                            <Pressable
+                              onPress={() => onEditMatch(item)}
+                              hitSlop={8}
+                            >
+                              <Text style={styles.matchEdit}>수정</Text>
+                            </Pressable>
+                            <Pressable
+                              disabled={deletingMatch}
+                              onPress={() => onDeleteMatch(item)}
+                              hitSlop={8}
+                            >
+                              <Text style={styles.matchDelete}>삭제</Text>
+                            </Pressable>
+                          </View>
+                        ) : null}
                       </View>
                     </View>
                   );
@@ -1217,8 +1243,17 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: colors.textOnDarkMuted,
   },
-  addBtn: {
+  eyebrowSpaced: {
+    marginTop: 14,
+  },
+  heroActions: {
     marginTop: 16,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
+  addBtn: {
     alignSelf: 'flex-start',
     backgroundColor: colors.lime,
     paddingHorizontal: 16,
@@ -1229,6 +1264,9 @@ const styles = StyleSheet.create({
     fontFamily: fonts.bodyBold,
     fontSize: 14,
     color: colors.court,
+  },
+  detailBadgeWrap: {
+    marginBottom: 12,
   },
   sheet: {
     flex: 1,

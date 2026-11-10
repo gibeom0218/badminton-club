@@ -27,11 +27,14 @@ import Animated, {
 } from 'react-native-reanimated';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
+import { AccountBadge } from '@/components/ui/AccountBadge';
 import { AttendanceHeatmap } from '@/components/ui/AttendanceHeatmap';
 import { StateView } from '@/components/ui/StateView';
 import { colors, fonts, spacing } from '@/constants/theme';
+import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
 import type {
+  AuthUser,
   Gender,
   Member,
   MemberAttendance,
@@ -109,6 +112,7 @@ type FormMode = 'create' | 'edit';
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const queryClient = useQueryClient();
+  const { user, isAdmin, logout } = useAuth();
   const [modalVisible, setModalVisible] = useState(false);
   const [formMode, setFormMode] = useState<FormMode>('create');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -299,16 +303,19 @@ export default function HomeScreen() {
             favoriteMutation.isPending &&
             favoriteMutation.variables?.id === selectedMemberId
           }
+          user={user}
+          isAdmin={isAdmin}
           onBack={() => setSelectedMemberId(null)}
           onToggleFavorite={() => {
-            if (selectedMember) toggleFavorite(selectedMember);
+            if (selectedMember && isAdmin) toggleFavorite(selectedMember);
           }}
           onEdit={() => {
-            if (selectedMember) openEdit(selectedMember);
+            if (selectedMember && isAdmin) openEdit(selectedMember);
           }}
           onDelete={() => {
-            if (selectedMember) confirmDelete(selectedMember);
+            if (selectedMember && isAdmin) confirmDelete(selectedMember);
           }}
+          onLogout={logout}
           onRefresh={() => {
             membersQuery.refetch();
             memberAttendancesQuery.refetch();
@@ -432,12 +439,6 @@ export default function HomeScreen() {
         end={{ x: 1, y: 1 }}
         style={[styles.hero, { paddingTop: insets.top + 20 }]}
       >
-        <View style={styles.courtLines} pointerEvents="none">
-          <View style={[styles.courtLine, styles.courtLineTop]} />
-          <View style={[styles.courtLine, styles.courtLineMid]} />
-          <View style={styles.courtCircle} />
-        </View>
-
         <Image
           source={require('../../assets/images/shuttlecock.jpg')}
           style={[styles.shuttlecock, { top: insets.top + 12 }]}
@@ -446,7 +447,8 @@ export default function HomeScreen() {
         />
 
         <Animated.View style={[styles.heroCopy, heroAnimStyle]}>
-          <Text style={styles.eyebrow}>CLUB DIRECTORY</Text>
+          <AccountBadge user={user} onLogout={logout} />
+          <Text style={[styles.eyebrow, styles.eyebrowSpaced]}>CLUB DIRECTORY</Text>
           <Text style={styles.brand}>BADMINTON</Text>
           <Text style={styles.brandSub}>동호회 회원</Text>
           <View style={styles.heroActions}>
@@ -454,9 +456,11 @@ export default function HomeScreen() {
               <Text style={styles.countValue}>{members.length}</Text>
               <Text style={styles.countLabel}>명 활동 중</Text>
             </View>
-            <Pressable style={styles.addBtn} onPress={openCreate}>
-              <Text style={styles.addBtnText}>+ 등록</Text>
-            </Pressable>
+            {isAdmin ? (
+              <Pressable style={styles.addBtn} onPress={openCreate}>
+                <Text style={styles.addBtnText}>+ 등록</Text>
+              </Pressable>
+            ) : null}
           </View>
         </Animated.View>
       </LinearGradient>
@@ -535,6 +539,7 @@ export default function HomeScreen() {
                   favoriteMutation.isPending &&
                   favoriteMutation.variables?.id === item.id
                 }
+                isAdmin={isAdmin}
                 onPress={() => setSelectedMemberId(item.id)}
                 onToggleFavorite={() => toggleFavorite(item)}
                 onEdit={() => openEdit(item)}
@@ -547,7 +552,8 @@ export default function HomeScreen() {
 
         {!membersQuery.isLoading &&
           !membersQuery.error &&
-          members.length === 0 && (
+          members.length === 0 &&
+          isAdmin && (
             <View style={styles.emptyAction}>
               <Pressable style={styles.emptyAddBtn} onPress={openCreate}>
                 <Text style={styles.emptyAddText}>회원 등록하기</Text>
@@ -671,10 +677,13 @@ function MemberDetailView({
   error,
   deleting,
   favoriting,
+  user,
+  isAdmin,
   onBack,
   onToggleFavorite,
   onEdit,
   onDelete,
+  onLogout,
   onRefresh,
   refreshing,
   topInset,
@@ -688,10 +697,13 @@ function MemberDetailView({
   error?: string;
   deleting: boolean;
   favoriting: boolean;
+  user: AuthUser | null;
+  isAdmin: boolean;
   onBack: () => void;
   onToggleFavorite: () => void;
   onEdit: () => void;
   onDelete: () => void;
+  onLogout: () => void;
   onRefresh: () => void;
   refreshing: boolean;
   topInset: number;
@@ -713,6 +725,9 @@ function MemberDetailView({
         <Pressable style={styles.backBtn} onPress={onBack} hitSlop={8}>
           <Text style={styles.backText}>← 목록</Text>
         </Pressable>
+        <View style={styles.detailBadgeWrap}>
+          <AccountBadge user={user} onLogout={onLogout} />
+        </View>
 
         {member ? (
           <>
@@ -722,18 +737,24 @@ function MemberDetailView({
                   {member.name.slice(0, 1)}
                 </Text>
               </View>
-              <Pressable
-                style={styles.detailStarBtn}
-                onPress={onToggleFavorite}
-                disabled={favoriting}
-                hitSlop={8}
-              >
-                <FontAwesome
-                  name={member.is_favorite ? 'star' : 'star-o'}
-                  size={26}
-                  color={member.is_favorite ? colors.lime : colors.textOnDarkMuted}
-                />
-              </Pressable>
+              {isAdmin ? (
+                <Pressable
+                  style={styles.detailStarBtn}
+                  onPress={onToggleFavorite}
+                  disabled={favoriting}
+                  hitSlop={8}
+                >
+                  <FontAwesome
+                    name={member.is_favorite ? 'star' : 'star-o'}
+                    size={26}
+                    color={
+                      member.is_favorite ? colors.lime : colors.textOnDarkMuted
+                    }
+                  />
+                </Pressable>
+              ) : member.is_favorite ? (
+                <FontAwesome name="star" size={26} color={colors.lime} />
+              ) : null}
             </View>
             <Text style={styles.detailName}>{member.name}</Text>
             <Text style={styles.detailSub}>
@@ -830,31 +851,33 @@ function MemberDetailView({
                 </View>
               </View>
 
-              <View style={styles.detailActions}>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.detailEditBtn,
-                    pressed && styles.actionPressed,
-                  ]}
-                  onPress={onEdit}
-                >
-                  <Text style={styles.detailEditText}>정보 수정</Text>
-                </Pressable>
-                <Pressable
-                  style={({ pressed }) => [
-                    styles.detailDeleteBtn,
-                    pressed && styles.actionPressed,
-                  ]}
-                  onPress={onDelete}
-                  disabled={deleting}
-                >
-                  {deleting ? (
-                    <ActivityIndicator color={colors.danger} />
-                  ) : (
-                    <Text style={styles.detailDeleteText}>회원 삭제</Text>
-                  )}
-                </Pressable>
-              </View>
+              {isAdmin ? (
+                <View style={styles.detailActions}>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.detailEditBtn,
+                      pressed && styles.actionPressed,
+                    ]}
+                    onPress={onEdit}
+                  >
+                    <Text style={styles.detailEditText}>정보 수정</Text>
+                  </Pressable>
+                  <Pressable
+                    style={({ pressed }) => [
+                      styles.detailDeleteBtn,
+                      pressed && styles.actionPressed,
+                    ]}
+                    onPress={onDelete}
+                    disabled={deleting}
+                  >
+                    {deleting ? (
+                      <ActivityIndicator color={colors.danger} />
+                    ) : (
+                      <Text style={styles.detailDeleteText}>회원 삭제</Text>
+                    )}
+                  </Pressable>
+                </View>
+              ) : null}
               </Animated.View>
             </ScrollView>
           )}
@@ -869,6 +892,7 @@ function MemberRow({
   index,
   deleting,
   favoriting,
+  isAdmin,
   onPress,
   onToggleFavorite,
   onEdit,
@@ -878,6 +902,7 @@ function MemberRow({
   index: number;
   deleting: boolean;
   favoriting: boolean;
+  isAdmin: boolean;
   onPress: () => void;
   onToggleFavorite: () => void;
   onEdit: () => void;
@@ -898,61 +923,72 @@ function MemberRow({
           <Text style={styles.name}>{member.name}</Text>
           <Text style={styles.meta}>{formatMemberMeta(member)}</Text>
         </View>
-        <Pressable
-          accessibilityRole="button"
-          accessibilityLabel={
-            member.is_favorite ? '즐겨찾기 해제' : '즐겨찾기 추가'
-          }
-          style={({ pressed }) => [
-            styles.starBtn,
-            pressed && styles.actionPressed,
-          ]}
-          onPress={(e) => {
-            e?.stopPropagation?.();
-            onToggleFavorite();
-          }}
-          disabled={favoriting}
-          hitSlop={8}
-        >
+        {isAdmin ? (
+          <>
+            <Pressable
+              accessibilityRole="button"
+              accessibilityLabel={
+                member.is_favorite ? '즐겨찾기 해제' : '즐겨찾기 추가'
+              }
+              style={({ pressed }) => [
+                styles.starBtn,
+                pressed && styles.actionPressed,
+              ]}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onToggleFavorite();
+              }}
+              disabled={favoriting}
+              hitSlop={8}
+            >
+              <FontAwesome
+                name={member.is_favorite ? 'star' : 'star-o'}
+                size={18}
+                color={member.is_favorite ? '#E6B422' : colors.textSecondary}
+              />
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.editBtn,
+                pressed && styles.actionPressed,
+              ]}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onEdit();
+              }}
+              hitSlop={8}
+            >
+              <Text style={styles.editText}>수정</Text>
+            </Pressable>
+            <Pressable
+              accessibilityRole="button"
+              style={({ pressed }) => [
+                styles.deleteBtn,
+                pressed && styles.actionPressed,
+              ]}
+              onPress={(e) => {
+                e?.stopPropagation?.();
+                onDelete();
+              }}
+              disabled={deleting}
+              hitSlop={8}
+            >
+              {deleting ? (
+                <ActivityIndicator size="small" color={colors.danger} />
+              ) : (
+                <Text style={styles.deleteText}>삭제</Text>
+              )}
+            </Pressable>
+          </>
+        ) : member.is_favorite ? (
           <FontAwesome
-            name={member.is_favorite ? 'star' : 'star-o'}
+            name="star"
             size={18}
-            color={member.is_favorite ? '#E6B422' : colors.textSecondary}
+            color="#E6B422"
+            style={{ marginRight: 8 }}
           />
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.editBtn,
-            pressed && styles.actionPressed,
-          ]}
-          onPress={(e) => {
-            e?.stopPropagation?.();
-            onEdit();
-          }}
-          hitSlop={8}
-        >
-          <Text style={styles.editText}>수정</Text>
-        </Pressable>
-        <Pressable
-          accessibilityRole="button"
-          style={({ pressed }) => [
-            styles.deleteBtn,
-            pressed && styles.actionPressed,
-          ]}
-          onPress={(e) => {
-            e?.stopPropagation?.();
-            onDelete();
-          }}
-          disabled={deleting}
-          hitSlop={8}
-        >
-          {deleting ? (
-            <ActivityIndicator size="small" color={colors.danger} />
-          ) : (
-            <Text style={styles.deleteText}>삭제</Text>
-          )}
-        </Pressable>
+        ) : null}
       </Pressable>
     </Animated.View>
   );
@@ -968,32 +1004,6 @@ const styles = StyleSheet.create({
     paddingBottom: 40,
     overflow: 'hidden',
     position: 'relative',
-  },
-  courtLines: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  courtLine: {
-    position: 'absolute',
-    left: 24,
-    right: 24,
-    height: 1,
-    backgroundColor: 'rgba(184, 224, 106, 0.28)',
-  },
-  courtLineTop: {
-    top: '38%',
-  },
-  courtLineMid: {
-    top: '62%',
-  },
-  courtCircle: {
-    position: 'absolute',
-    right: -40,
-    top: 24,
-    width: 140,
-    height: 140,
-    borderRadius: 70,
-    borderWidth: 1.5,
-    borderColor: 'rgba(184, 224, 106, 0.22)',
   },
   shuttlecock: {
     position: 'absolute',
@@ -1014,6 +1024,9 @@ const styles = StyleSheet.create({
     letterSpacing: 3,
     color: colors.lime,
     marginBottom: 6,
+  },
+  eyebrowSpaced: {
+    marginTop: 14,
   },
   brand: {
     fontFamily: fonts.display,
@@ -1222,13 +1235,16 @@ const styles = StyleSheet.create({
   },
   backBtn: {
     alignSelf: 'flex-start',
-    marginBottom: 14,
+    marginBottom: 10,
     ...(Platform.OS === 'web' ? ({ cursor: 'pointer' } as object) : null),
   },
   backText: {
     fontFamily: fonts.bodyMedium,
     color: colors.lime,
     fontSize: 14,
+  },
+  detailBadgeWrap: {
+    marginBottom: 14,
   },
   detailNameRow: {
     flexDirection: 'row',

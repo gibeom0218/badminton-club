@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { requireAdmin } from '../auth';
 import { pool } from '../db';
 
 const router = Router();
@@ -53,7 +54,7 @@ router.get('/', async (_req, res) => {
 });
 
 // POST /api/members — 회원 등록
-router.post('/', async (req, res) => {
+router.post('/', requireAdmin, async (req, res) => {
   try {
     const name =
       typeof req.body?.name === 'string' ? req.body.name.trim() : '';
@@ -96,7 +97,7 @@ router.post('/', async (req, res) => {
 });
 
 // PUT /api/members/:id — 회원 수정
-router.put('/:id', async (req, res) => {
+router.put('/:id', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -163,7 +164,7 @@ router.put('/:id', async (req, res) => {
 });
 
 // POST /api/members/:id/favorite — 공통 즐겨찾기 추가 (user_id NULL)
-router.post('/:id/favorite', async (req, res) => {
+router.post('/:id/favorite', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -204,7 +205,7 @@ router.post('/:id/favorite', async (req, res) => {
 });
 
 // DELETE /api/members/:id/favorite — 공통 즐겨찾기 해제
-router.delete('/:id/favorite', async (req, res) => {
+router.delete('/:id/favorite', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -263,7 +264,7 @@ router.get('/:id/attendances', async (req, res) => {
 });
 
 // DELETE /api/members/:id — 회원 삭제
-router.delete('/:id', async (req, res) => {
+router.delete('/:id', requireAdmin, async (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {

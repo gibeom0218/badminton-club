@@ -1,4 +1,5 @@
 import type {
+  LoginResponse,
   Match,
   MatchInput,
   Member,
@@ -6,24 +7,33 @@ import type {
   MemberInput,
   Session,
   SessionInput,
+  AuthUser,
 } from '@/types/api';
 
 const API_URL = process.env.EXPO_PUBLIC_API_URL ?? 'http://localhost:3000';
+
+let authTokenProvider: () => string | null = () => null;
+
+export function setAuthTokenProvider(provider: () => string | null) {
+  authTokenProvider = provider;
+}
 
 async function request<T>(
   path: string,
   options?: RequestInit,
 ): Promise<T> {
   const url = `${API_URL}${path}`;
+  const token = authTokenProvider();
 
   let response: Response;
   try {
     response = await fetch(url, {
+      ...options,
       headers: {
         'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
         ...(options?.headers ?? {}),
       },
-      ...options,
     });
   } catch {
     throw new Error(
@@ -49,6 +59,15 @@ async function request<T>(
 }
 
 export const api = {
+  login: (username: string, password: string) =>
+    request<LoginResponse>('/api/auth/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+
+  getMe: () =>
+    request<AuthUser & { created_at?: string }>('/api/auth/me'),
+
   getMembers: () => request<Member[]>('/api/members'),
 
   createMember: (payload: MemberInput) =>

@@ -1,6 +1,8 @@
 import cors from 'cors';
 import express from 'express';
+import { requireAuth } from './auth';
 import { checkDatabaseConnection } from './db';
+import authRouter from './routes/auth';
 import membersRouter from './routes/members';
 import sessionsRouter from './routes/sessions';
 
@@ -29,6 +31,10 @@ async function main(): Promise<void> {
     res.json({
       service: 'badminton-club-server',
       endpoints: {
+        auth: {
+          login: 'POST /api/auth/login',
+          me: 'GET /api/auth/me',
+        },
         members: {
           list: 'GET /api/members',
           create: 'POST /api/members',
@@ -53,8 +59,9 @@ async function main(): Promise<void> {
     });
   });
 
-  app.use('/api/members', membersRouter);
-  app.use('/api/sessions', sessionsRouter);
+  app.use('/api/auth', authRouter);
+  app.use('/api/members', requireAuth, membersRouter);
+  app.use('/api/sessions', requireAuth, sessionsRouter);
 
   app.listen(PORT, '0.0.0.0', () => {
     console.log(`🚀 API 서버 실행 중: http://localhost:${PORT}`);
