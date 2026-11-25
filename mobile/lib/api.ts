@@ -7,6 +7,8 @@ import type {
   MemberInput,
   Session,
   SessionInput,
+  SessionShuttlecock,
+  SessionShuttlecockInput,
   AuthUser,
 } from '@/types/api';
 
@@ -140,6 +142,15 @@ export const api = {
   deleteMatch: (sessionId: number, matchId: number) =>
     request<void>(`/api/sessions/${sessionId}/matches/${matchId}`, {
       method: 'DELETE',
+    }),
+
+  getShuttlecock: (sessionId: number) =>
+    request<SessionShuttlecock>(`/api/sessions/${sessionId}/shuttlecock`),
+
+  upsertShuttlecock: (sessionId: number, payload: SessionShuttlecockInput) =>
+    request<SessionShuttlecock>(`/api/sessions/${sessionId}/shuttlecock`, {
+      method: 'PUT',
+      body: JSON.stringify(payload),
     }),
 };
 

@@ -82,3 +82,32 @@ export interface MatchInput {
   score_b: number;
   note?: string | null;
 }
+
+export interface SessionShuttlecock {
+  id: number | null;
+  session_id: number;
+  previous_tube: number;
+  previous_ea: number;
+  incoming_tube: number;
+  incoming_ea: number;
+  sold_tube: number;
+  sold_ea: number;
+  current_tube: number;
+  current_ea: number;
+  sales_details: string | null;
+  duty_names: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  is_new: boolean;
+}
+
+export interface SessionShuttlecockInput {
+  previous_tube: number;
+  previous_ea: number;
+  incoming_tube: number;
+  incoming_ea: number;
+  sold_tube: number;
+  sold_ea: number;
+  sales_details?: string | null;
+  duty_names?: string | null;
+}

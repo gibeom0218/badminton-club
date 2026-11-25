@@ -229,6 +229,256 @@ router.delete('/:id/attendances/:memberId', requireAdmin, async (req, res) => {
   }
 });
 
+const EA_PER_TUBE = 12;
+
+function parseNonNegInt(value: unknown): number | 'invalid' {
+  if (value === undefined || value === null || value === '') return 0;
+  const n = typeof value === 'number' ? value : Number(value);
+  if (!Number.isInteger(n) || n < 0) return 'invalid';
+  return n;
+}
+
+function toPieces(tube: number, ea: number): number {
+  return tube * EA_PER_TUBE + ea;
+}
+
+function fromPieces(total: number): { tube: number; ea: number } {
+  return {
+    tube: Math.floor(total / EA_PER_TUBE),
+    ea: total % EA_PER_TUBE,
+  };
+}
+
+type ShuttlecockRow = {
+  id: number;
+  session_id: number;
+  previous_tube: number;
+  previous_ea: number;
+  incoming_tube: number;
+  incoming_ea: number;
+  sold_tube: number;
+  sold_ea: number;
+  current_tube: number;
+  current_ea: number;
+  sales_details: string | null;
+  duty_names: string | null;
+  created_at: string;
+  updated_at: string;
+};
+
+const SHUTTLECOCK_SELECT = `
+  id, session_id,
+  previous_tube, previous_ea,
+  incoming_tube, incoming_ea,
+  sold_tube, sold_ea,
+  current_tube, current_ea,
+  sales_details, duty_names,
+  created_at, updated_at
+`;
+
+async function getPreviousStockDefaults(sessionId: number): Promise<{
+  previous_tube: number;
+  previous_ea: number;
+}> {
+  const result = await pool.query<{ current_tube: number; current_ea: number }>(
+    `SELECT ss.current_tube, ss.current_ea
+     FROM public.session_shuttlecock ss
+     JOIN public.sessions s ON s.id = ss.session_id
+     JOIN public.sessions cur ON cur.id = $1
+     WHERE s.session_date < cur.session_date
+        OR (s.session_date = cur.session_date AND s.id < cur.id)
+     ORDER BY s.session_date DESC, s.id DESC
+     LIMIT 1`,
+    [sessionId],
+  );
+
+  if ((result.rowCount ?? 0) === 0) {
+    return { previous_tube: 0, previous_ea: 0 };
+  }
+
+  return {
+    previous_tube: result.rows[0].current_tube,
+    previous_ea: result.rows[0].current_ea,
+  };
+}
+
+// GET /api/sessions/:id/shuttlecock — 셔틀콕 재고 (없으면 전일재고 이어받기 draft)
+router.get('/:id/shuttlecock', async (req, res) => {
+  try {
+    const sessionId = Number(req.params.id);
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      res.status(400).json({ error: '유효한 모임 id가 필요합니다.' });
+      return;
+    }
+
+    const sessionCheck = await pool.query(
+      `SELECT id FROM public.sessions WHERE id = $1`,
+      [sessionId],
+    );
+    if (sessionCheck.rowCount === 0) {
+      res.status(404).json({ error: '모임을 찾을 수 없습니다.' });
+      return;
+    }
+
+    const existing = await pool.query<ShuttlecockRow>(
+      `SELECT ${SHUTTLECOCK_SELECT}
+       FROM public.session_shuttlecock
+       WHERE session_id = $1`,
+      [sessionId],
+    );
+
+    if ((existing.rowCount ?? 0) > 0) {
+      res.json({ ...existing.rows[0], is_new: false });
+      return;
+    }
+
+    const prev = await getPreviousStockDefaults(sessionId);
+    const current = fromPieces(toPieces(prev.previous_tube, prev.previous_ea));
+
+    res.json({
+      id: null,
+      session_id: sessionId,
+      previous_tube: prev.previous_tube,
+      previous_ea: prev.previous_ea,
+      incoming_tube: 0,
+      incoming_ea: 0,
+      sold_tube: 0,
+      sold_ea: 0,
+      current_tube: current.tube,
+      current_ea: current.ea,
+      sales_details: '',
+      duty_names: '',
+      created_at: null,
+      updated_at: null,
+      is_new: true,
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '셔틀콕 재고 조회에 실패했습니다.' });
+  }
+});
+
+// PUT /api/sessions/:id/shuttlecock — 셔틀콕 재고 upsert
+router.put('/:id/shuttlecock', requireAdmin, async (req, res) => {
+  try {
+    const sessionId = Number(req.params.id);
+    if (!Number.isInteger(sessionId) || sessionId <= 0) {
+      res.status(400).json({ error: '유효한 모임 id가 필요합니다.' });
+      return;
+    }
+
+    const sessionCheck = await pool.query(
+      `SELECT id FROM public.sessions WHERE id = $1`,
+      [sessionId],
+    );
+    if (sessionCheck.rowCount === 0) {
+      res.status(404).json({ error: '모임을 찾을 수 없습니다.' });
+      return;
+    }
+
+    const previousTube = parseNonNegInt(req.body?.previous_tube);
+    const previousEa = parseNonNegInt(req.body?.previous_ea);
+    const incomingTube = parseNonNegInt(req.body?.incoming_tube);
+    const incomingEa = parseNonNegInt(req.body?.incoming_ea);
+    const soldTube = parseNonNegInt(req.body?.sold_tube);
+    const soldEa = parseNonNegInt(req.body?.sold_ea);
+    const salesDetailsRaw =
+      typeof req.body?.sales_details === 'string'
+        ? req.body.sales_details.trim()
+        : '';
+    const dutyNamesRaw =
+      typeof req.body?.duty_names === 'string' ? req.body.duty_names.trim() : '';
+    const dutyNameParts = dutyNamesRaw
+      .split(/[,，、/]/)
+      .map((s: string) => s.trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    const dutyNamesNormalized = dutyNameParts.join(', ');
+
+    if (
+      previousTube === 'invalid' ||
+      previousEa === 'invalid' ||
+      incomingTube === 'invalid' ||
+      incomingEa === 'invalid' ||
+      soldTube === 'invalid' ||
+      soldEa === 'invalid'
+    ) {
+      res.status(400).json({ error: '통/개 수량은 0 이상 정수여야 합니다.' });
+      return;
+    }
+    if (salesDetailsRaw.length > 2000) {
+      res.status(400).json({ error: '판매내역은 2000자 이하여야 합니다.' });
+      return;
+    }
+    if (dutyNamesNormalized.length > 200) {
+      res.status(400).json({ error: '당번은 200자 이하여야 합니다.' });
+      return;
+    }
+
+    const prevPieces = toPieces(previousTube, previousEa);
+    const inPieces = toPieces(incomingTube, incomingEa);
+    const soldPieces = toPieces(soldTube, soldEa);
+    const currentPieces = prevPieces + inPieces - soldPieces;
+
+    if (currentPieces < 0) {
+      res.status(400).json({
+        error: '당일재고가 음수가 됩니다. 판매/수입/전일재고를 확인하세요.',
+      });
+      return;
+    }
+
+    // 입력 통·개도 12개 기준으로 정규화해 저장
+    const prevNorm = fromPieces(prevPieces);
+    const inNorm = fromPieces(inPieces);
+    const soldNorm = fromPieces(soldPieces);
+    const currentNorm = fromPieces(currentPieces);
+    const salesDetails = salesDetailsRaw || null;
+    const dutyNames = dutyNamesNormalized || null;
+
+    const result = await pool.query<ShuttlecockRow>(
+      `INSERT INTO public.session_shuttlecock (
+         session_id,
+         previous_tube, previous_ea,
+         incoming_tube, incoming_ea,
+         sold_tube, sold_ea,
+         current_tube, current_ea,
+         sales_details, duty_names
+       ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+       ON CONFLICT (session_id) DO UPDATE SET
+         previous_tube = EXCLUDED.previous_tube,
+         previous_ea = EXCLUDED.previous_ea,
+         incoming_tube = EXCLUDED.incoming_tube,
+         incoming_ea = EXCLUDED.incoming_ea,
+         sold_tube = EXCLUDED.sold_tube,
+         sold_ea = EXCLUDED.sold_ea,
+         current_tube = EXCLUDED.current_tube,
+         current_ea = EXCLUDED.current_ea,
+         sales_details = EXCLUDED.sales_details,
+         duty_names = EXCLUDED.duty_names,
+         updated_at = NOW()
+       RETURNING ${SHUTTLECOCK_SELECT}`,
+      [
+        sessionId,
+        prevNorm.tube,
+        prevNorm.ea,
+        inNorm.tube,
+        inNorm.ea,
+        soldNorm.tube,
+        soldNorm.ea,
+        currentNorm.tube,
+        currentNorm.ea,
+        salesDetails,
+        dutyNames,
+      ],
+    );
+
+    res.json({ ...result.rows[0], is_new: false });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: '셔틀콕 재고 저장에 실패했습니다.' });
+  }
+});
+
 function parsePositiveInt(value: unknown): number | null {
   const n = typeof value === 'number' ? value : Number(value);
   if (!Number.isInteger(n) || n <= 0) return null;

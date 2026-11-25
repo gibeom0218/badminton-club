@@ -54,6 +54,8 @@ async function main(): Promise<void> {
           createMatch: 'POST /api/sessions/:id/matches',
           updateMatch: 'PUT /api/sessions/:id/matches/:matchId',
           deleteMatch: 'DELETE /api/sessions/:id/matches/:matchId',
+          shuttlecock: 'GET /api/sessions/:id/shuttlecock',
+          upsertShuttlecock: 'PUT /api/sessions/:id/shuttlecock',
         },
       },
     });

@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
@@ -23,7 +23,41 @@ import { StateView } from '@/components/ui/StateView';
 import { colors, fonts, spacing } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
 import { api } from '@/lib/api';
-import type { AuthUser, Match, Member, Session } from '@/types/api';
+import type {
+  AuthUser,
+  Match,
+  Member,
+  Session,
+  SessionShuttlecock,
+  SessionShuttlecockInput,
+} from '@/types/api';
+
+type DetailTab = 'attendance' | 'matches' | 'inventory';
+
+const EA_PER_TUBE = 12;
+
+function parseQtyText(value: string): number {
+  const trimmed = value.trim();
+  if (!trimmed) return 0;
+  const n = Number(trimmed);
+  if (!Number.isInteger(n) || n < 0) return NaN;
+  return n;
+}
+
+function toPieces(tube: number, ea: number): number {
+  return tube * EA_PER_TUBE + ea;
+}
+
+function fromPieces(total: number): { tube: number; ea: number } {
+  return {
+    tube: Math.floor(total / EA_PER_TUBE),
+    ea: total % EA_PER_TUBE,
+  };
+}
+
+function formatStock(tube: number, ea: number): string {
+  return `${tube}통 ${ea}개`;
+}
 
 function todayIsoDate(): string {
   const d = new Date();
@@ -33,21 +67,45 @@ function todayIsoDate(): string {
   return `${y}-${m}-${day}`;
 }
 
-function formatDisplayDate(isoDate: string): string {
-  // API는 YYYY-MM-DD를 주지만, ISO datetime이 오면 로컬 날짜 기준으로 표시
+const WEEKDAY_KO = ['일', '월', '화', '수', '목', '금', '토'] as const;
+
+/** YYYY-MM-DD → 로컬 Date (UTC 파싱으로 하루 밀리는 것 방지) */
+function parseLocalDate(isoDate: string): Date | null {
   const raw = String(isoDate ?? '');
-  if (/^\d{4}-\d{2}-\d{2}/.test(raw) && !raw.includes('T')) {
-    const [y, m, d] = raw.slice(0, 10).split('-');
-    return `${y}.${m}.${d}`;
+  if (/^\d{4}-\d{2}-\d{2}/.test(raw)) {
+    const [y, m, d] = raw.slice(0, 10).split('-').map(Number);
+    if (!y || !m || !d) return null;
+    const date = new Date(y, m - 1, d);
+    if (Number.isNaN(date.getTime())) return null;
+    return date;
   }
   const parsed = new Date(raw);
-  if (!Number.isNaN(parsed.getTime())) {
-    const y = parsed.getFullYear();
-    const m = String(parsed.getMonth() + 1).padStart(2, '0');
-    const d = String(parsed.getDate()).padStart(2, '0');
-    return `${y}.${m}.${d}`;
-  }
-  return raw;
+  if (Number.isNaN(parsed.getTime())) return null;
+  return parsed;
+}
+
+function weekdayKo(isoDate: string): string | null {
+  const date = parseLocalDate(isoDate);
+  if (!date) return null;
+  return WEEKDAY_KO[date.getDay()] ?? null;
+}
+
+function formatDisplayDate(isoDate: string): string {
+  // API는 YYYY-MM-DD를 주지만, ISO datetime이 오면 로컬 날짜 기준으로 표시
+  const date = parseLocalDate(isoDate);
+  if (!date) return String(isoDate ?? '');
+  const y = date.getFullYear();
+  const m = String(date.getMonth() + 1).padStart(2, '0');
+  const d = String(date.getDate()).padStart(2, '0');
+  const weekday = WEEKDAY_KO[date.getDay()];
+  return `${y}.${m}.${d} (${weekday})`;
+}
+
+/** 제목 + 요일 표시. 예: 정기 모임 (화) */
+function formatSessionTitle(title: string, isoDate: string): string {
+  const weekday = weekdayKo(isoDate);
+  const base = title?.trim() || '정기 모임';
+  return weekday ? `${base} (${weekday})` : base;
 }
 
 function showAlert(title: string, message: string) {
@@ -68,9 +126,7 @@ export default function AttendanceScreen() {
   const [place, setPlace] = useState('일광초등학교');
   const [sessionDate, setSessionDate] = useState(todayIsoDate());
   const [memberSearch, setMemberSearch] = useState('');
-  const [detailTab, setDetailTab] = useState<'attendance' | 'matches'>(
-    'attendance',
-  );
+  const [detailTab, setDetailTab] = useState<DetailTab>('attendance');
   const [matchModalVisible, setMatchModalVisible] = useState(false);
   const [editingMatchId, setEditingMatchId] = useState<number | null>(null);
   const [teamA1, setTeamA1] = useState<number | null>(null);
@@ -111,6 +167,12 @@ export default function AttendanceScreen() {
   const matchesQuery = useQuery({
     queryKey: ['sessions', selectedId, 'matches'],
     queryFn: () => api.getMatches(selectedId!),
+    enabled: selectedId != null,
+  });
+
+  const shuttlecockQuery = useQuery({
+    queryKey: ['sessions', selectedId, 'shuttlecock'],
+    queryFn: () => api.getShuttlecock(selectedId!),
     enabled: selectedId != null,
   });
 
@@ -207,6 +269,25 @@ export default function AttendanceScreen() {
       queryClient.invalidateQueries({ queryKey: ['members'] });
     },
     onError: (err: Error) => showAlert('경기 삭제 실패', err.message),
+  });
+
+  const saveShuttlecockMutation = useMutation({
+    mutationFn: ({
+      sessionId,
+      payload,
+    }: {
+      sessionId: number;
+      payload: SessionShuttlecockInput;
+    }) => api.upsertShuttlecock(sessionId, payload),
+    onSuccess: () => {
+      if (selectedId != null) {
+        queryClient.invalidateQueries({
+          queryKey: ['sessions', selectedId, 'shuttlecock'],
+        });
+      }
+      showAlert('저장 완료', '셔틀콕 재고를 저장했습니다.');
+    },
+    onError: (err: Error) => showAlert('재고 저장 실패', err.message),
   });
 
   const sessions = sessionsQuery.data ?? [];
@@ -426,6 +507,14 @@ export default function AttendanceScreen() {
             (!!selectedId && sessionDetailQuery.isFetching && !selected)
           }
           matchesLoading={matchesQuery.isLoading}
+          shuttlecock={shuttlecockQuery.data ?? null}
+          shuttlecockLoading={shuttlecockQuery.isLoading}
+          shuttlecockError={shuttlecockQuery.error?.message}
+          savingShuttlecock={saveShuttlecockMutation.isPending}
+          onSaveShuttlecock={(payload) => {
+            if (selectedId == null) return;
+            saveShuttlecockMutation.mutate({ sessionId: selectedId, payload });
+          }}
           error={
             sessionDetailQuery.error?.message ??
             membersQuery.error?.message ??
@@ -455,11 +544,13 @@ export default function AttendanceScreen() {
             sessionDetailQuery.refetch();
             membersQuery.refetch();
             matchesQuery.refetch();
+            shuttlecockQuery.refetch();
           }}
           refreshing={
             sessionDetailQuery.isRefetching ||
             membersQuery.isRefetching ||
-            matchesQuery.isRefetching
+            matchesQuery.isRefetching ||
+            shuttlecockQuery.isRefetching
           }
           bottomInset={insets.bottom}
           topInset={insets.top}
@@ -789,7 +880,9 @@ export default function AttendanceScreen() {
                   <Text style={styles.sessionDate}>
                     {formatDisplayDate(item.session_date)}
                   </Text>
-                  <Text style={styles.sessionTitle}>{item.title}</Text>
+                  <Text style={styles.sessionTitle}>
+                    {formatSessionTitle(item.title, item.session_date)}
+                  </Text>
                   {!!item.place && (
                     <Text style={styles.sessionPlace}>{item.place}</Text>
                   )}
@@ -899,6 +992,11 @@ function SessionDetailView({
   matches,
   loading,
   matchesLoading,
+  shuttlecock,
+  shuttlecockLoading,
+  shuttlecockError,
+  savingShuttlecock,
+  onSaveShuttlecock,
   error,
   search,
   onSearchChange,
@@ -918,13 +1016,18 @@ function SessionDetailView({
   topInset,
 }: {
   session: Session | null;
-  detailTab: 'attendance' | 'matches';
-  onDetailTabChange: (tab: 'attendance' | 'matches') => void;
+  detailTab: DetailTab;
+  onDetailTabChange: (tab: DetailTab) => void;
   members: Member[];
   attendedMembers: Member[];
   matches: Match[];
   loading: boolean;
   matchesLoading: boolean;
+  shuttlecock: SessionShuttlecock | null;
+  shuttlecockLoading: boolean;
+  shuttlecockError?: string;
+  savingShuttlecock: boolean;
+  onSaveShuttlecock: (payload: SessionShuttlecockInput) => void;
   error?: string;
   search: string;
   onSearchChange: (v: string) => void;
@@ -962,7 +1065,9 @@ function SessionDetailView({
             <Text style={styles.checkDate}>
               {formatDisplayDate(session.session_date)}
             </Text>
-            <Text style={styles.checkTitle}>{session.title}</Text>
+            <Text style={styles.checkTitle}>
+              {formatSessionTitle(session.title, session.session_date)}
+            </Text>
             {!!session.place && (
               <Text style={styles.checkPlace}>{session.place}</Text>
             )}
@@ -1011,6 +1116,22 @@ function SessionDetailView({
               ]}
             >
               경기
+            </Text>
+          </Pressable>
+          <Pressable
+            style={[
+              styles.segmentBtn,
+              detailTab === 'inventory' && styles.segmentBtnOn,
+            ]}
+            onPress={() => onDetailTabChange('inventory')}
+          >
+            <Text
+              style={[
+                styles.segmentText,
+                detailTab === 'inventory' && styles.segmentTextOn,
+              ]}
+            >
+              재고
             </Text>
           </Pressable>
         </View>
@@ -1125,7 +1246,7 @@ function SessionDetailView({
               />
             </StateView>
           </View>
-        ) : (
+        ) : detailTab === 'matches' ? (
           <>
             <View style={styles.matchToolbar}>
               <Text style={styles.matchCount}>
@@ -1210,7 +1331,368 @@ function SessionDetailView({
               />
             </StateView>
           </>
+        ) : (
+          <ShuttlecockInventoryPanel
+            data={shuttlecock}
+            members={members}
+            loading={shuttlecockLoading}
+            error={shuttlecockError}
+            isAdmin={isAdmin}
+            saving={savingShuttlecock}
+            onSave={onSaveShuttlecock}
+            onRefresh={onRefresh}
+            refreshing={refreshing}
+            bottomInset={bottomInset}
+          />
         )}
+      </View>
+    </View>
+  );
+}
+
+function ShuttlecockInventoryPanel({
+  data,
+  members,
+  loading,
+  error,
+  isAdmin,
+  saving,
+  onSave,
+  onRefresh,
+  refreshing,
+  bottomInset,
+}: {
+  data: SessionShuttlecock | null;
+  members: Member[];
+  loading: boolean;
+  error?: string;
+  isAdmin: boolean;
+  saving: boolean;
+  onSave: (payload: SessionShuttlecockInput) => void;
+  onRefresh: () => void;
+  refreshing: boolean;
+  bottomInset: number;
+}) {
+  const [previousTube, setPreviousTube] = useState('');
+  const [previousEa, setPreviousEa] = useState('');
+  const [incomingTube, setIncomingTube] = useState('');
+  const [incomingEa, setIncomingEa] = useState('');
+  const [soldTube, setSoldTube] = useState('');
+  const [soldEa, setSoldEa] = useState('');
+  const [salesDetails, setSalesDetails] = useState('');
+  const [dutyIds, setDutyIds] = useState<number[]>([]);
+  const [dutyPickerOpen, setDutyPickerOpen] = useState(false);
+  const [dutySearch, setDutySearch] = useState('');
+
+  useEffect(() => {
+    if (!data) return;
+    setPreviousTube(String(data.previous_tube ?? 0));
+    setPreviousEa(String(data.previous_ea ?? 0));
+    setIncomingTube(String(data.incoming_tube ?? 0));
+    setIncomingEa(String(data.incoming_ea ?? 0));
+    setSoldTube(String(data.sold_tube ?? 0));
+    setSoldEa(String(data.sold_ea ?? 0));
+    setSalesDetails(data.sales_details ?? '');
+
+    const parts = String(data.duty_names ?? '')
+      .split(/[,，、/]/)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .slice(0, 2);
+    const byName = new Map(members.map((m) => [m.name, m.id]));
+    const ids = parts
+      .map((name) => byName.get(name))
+      .filter((id): id is number => typeof id === 'number');
+    setDutyIds(ids);
+  }, [data, members]);
+
+  const dutyCandidates = useMemo(() => {
+    const q = dutySearch.trim().toLowerCase();
+    const sorted = [...members].sort((a, b) =>
+      a.name.localeCompare(b.name, 'ko'),
+    );
+    if (!q) return sorted;
+    return sorted.filter((m) => m.name.toLowerCase().includes(q));
+  }, [members, dutySearch]);
+
+  const selectedDutyNames = useMemo(() => {
+    const map = new Map(members.map((m) => [m.id, m.name]));
+    return dutyIds
+      .map((id) => map.get(id))
+      .filter((name): name is string => !!name);
+  }, [dutyIds, members]);
+
+  const previewCurrent = useMemo(() => {
+    const pt = parseQtyText(previousTube);
+    const pe = parseQtyText(previousEa);
+    const it = parseQtyText(incomingTube);
+    const ie = parseQtyText(incomingEa);
+    const st = parseQtyText(soldTube);
+    const se = parseQtyText(soldEa);
+    if ([pt, pe, it, ie, st, se].some((n) => Number.isNaN(n))) {
+      return null;
+    }
+    const total = toPieces(pt, pe) + toPieces(it, ie) - toPieces(st, se);
+    if (total < 0) return null;
+    return fromPieces(total);
+  }, [
+    previousTube,
+    previousEa,
+    incomingTube,
+    incomingEa,
+    soldTube,
+    soldEa,
+  ]);
+
+  function toggleDuty(memberId: number) {
+    setDutyIds((prev) => {
+      if (prev.includes(memberId)) {
+        return prev.filter((id) => id !== memberId);
+      }
+      if (prev.length >= 2) {
+        showAlert('당번 선택', '당번은 최대 2명까지 선택할 수 있습니다.');
+        return prev;
+      }
+      return [...prev, memberId];
+    });
+  }
+
+  function handleSave() {
+    const pt = parseQtyText(previousTube);
+    const pe = parseQtyText(previousEa);
+    const it = parseQtyText(incomingTube);
+    const ie = parseQtyText(incomingEa);
+    const st = parseQtyText(soldTube);
+    const se = parseQtyText(soldEa);
+    if ([pt, pe, it, ie, st, se].some((n) => Number.isNaN(n))) {
+      showAlert('입력 오류', '통/개 수량은 0 이상 정수여야 합니다.');
+      return;
+    }
+    onSave({
+      previous_tube: pt,
+      previous_ea: pe,
+      incoming_tube: it,
+      incoming_ea: ie,
+      sold_tube: st,
+      sold_ea: se,
+      sales_details: salesDetails.trim(),
+      duty_names: selectedDutyNames.slice(0, 2).join(', '),
+    });
+  }
+
+  return (
+    <StateView loading={loading} error={error} empty={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: bottomInset + 28 }}
+        keyboardShouldPersistTaps="handled"
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            tintColor={colors.primary}
+            colors={[colors.primary]}
+            onRefresh={onRefresh}
+          />
+        }
+      >
+
+        <Text style={styles.inventoryFieldLabel}>당번 (최대 2명)</Text>
+        <Pressable
+          style={[
+            styles.dutyPickFull,
+            selectedDutyNames.length > 0 && styles.dutyPickFilled,
+            !isAdmin && styles.inventoryReadonly,
+          ]}
+          disabled={!isAdmin}
+          onPress={() => {
+            setDutySearch('');
+            setDutyPickerOpen(true);
+          }}
+        >
+          <Text style={styles.dutyPickText}>
+            {selectedDutyNames.length > 0
+              ? selectedDutyNames.join(', ')
+              : '당번 선택'}
+          </Text>
+          <Text style={styles.dutyPickCount}>{selectedDutyNames.length}/2</Text>
+        </Pressable>
+        {isAdmin && selectedDutyNames.length > 0 ? (
+          <Pressable
+            onPress={() => setDutyIds([])}
+            hitSlop={8}
+            style={styles.dutyClearWrap}
+          >
+            <Text style={styles.dutyClearText}>당번 비우기</Text>
+          </Pressable>
+        ) : null}
+
+        <InventoryQtyRow
+          label="전일재고"
+          tube={previousTube}
+          ea={previousEa}
+          onTubeChange={setPreviousTube}
+          onEaChange={setPreviousEa}
+          editable={isAdmin}
+        />
+        <InventoryQtyRow
+          label="당일수입"
+          tube={incomingTube}
+          ea={incomingEa}
+          onTubeChange={setIncomingTube}
+          onEaChange={setIncomingEa}
+          editable={isAdmin}
+        />
+        <InventoryQtyRow
+          label="당일판매"
+          tube={soldTube}
+          ea={soldEa}
+          onTubeChange={setSoldTube}
+          onEaChange={setSoldEa}
+          editable={isAdmin}
+        />
+
+        <View style={styles.inventoryCurrentBox}>
+          <Text style={styles.inventoryCurrentLabel}>당일재고 (자동 계산)</Text>
+          <Text style={styles.inventoryCurrentValue}>
+            {previewCurrent
+              ? formatStock(previewCurrent.tube, previewCurrent.ea)
+              : '수량 확인 필요'}
+          </Text>
+        </View>
+
+        <Text style={styles.inventoryFieldLabel}>판매내역</Text>
+        <TextInput
+          style={[styles.inventoryTextArea, !isAdmin && styles.inventoryReadonly]}
+          value={salesDetails}
+          onChangeText={setSalesDetails}
+          editable={isAdmin}
+          multiline
+          numberOfLines={4}
+          textAlignVertical="top"
+          placeholder="예: 이미정 콕 1타 / 정영환 콕 1타"
+          placeholderTextColor={colors.textSecondary}
+        />
+
+        {isAdmin ? (
+          <Pressable
+            style={[styles.inventorySaveBtn, saving && styles.inventorySaveDisabled]}
+            disabled={saving}
+            onPress={handleSave}
+          >
+            {saving ? (
+              <ActivityIndicator color={colors.court} />
+            ) : (
+              <Text style={styles.inventorySaveText}>재고 저장</Text>
+            )}
+          </Pressable>
+        ) : (
+          <Text style={styles.inventoryHint}>일반 계정은 조회만 가능합니다.</Text>
+        )}
+      </ScrollView>
+
+      <Modal
+        visible={dutyPickerOpen}
+        animationType="slide"
+        transparent
+        onRequestClose={() => setDutyPickerOpen(false)}
+      >
+        <View style={styles.modalBackdrop}>
+          <View
+            style={[
+              styles.pickerSheet,
+              { paddingBottom: Math.max(bottomInset, 16) },
+            ]}
+          >
+            <View style={styles.pickerHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={styles.modalTitle}>당번 선택</Text>
+                <Text style={styles.modalHint}>
+                  최대 2명까지 선택할 수 있습니다 ({dutyIds.length}/2)
+                </Text>
+              </View>
+              <Pressable onPress={() => setDutyPickerOpen(false)} hitSlop={8}>
+                <Text style={styles.clearText}>완료</Text>
+              </Pressable>
+            </View>
+            <View style={styles.searchBox}>
+              <TextInput
+                style={styles.searchInput}
+                placeholder="이름 검색"
+                placeholderTextColor={colors.textSecondary}
+                value={dutySearch}
+                onChangeText={setDutySearch}
+                autoCorrect={false}
+                autoCapitalize="none"
+                clearButtonMode="while-editing"
+              />
+            </View>
+            <FlatList
+              data={dutyCandidates}
+              keyExtractor={(item) => String(item.id)}
+              keyboardShouldPersistTaps="handled"
+              ItemSeparatorComponent={() => <View style={styles.separator} />}
+              renderItem={({ item }) => {
+                const selected = dutyIds.includes(item.id);
+                const locked = !selected && dutyIds.length >= 2;
+                return (
+                  <Pressable
+                    style={[styles.pickerRow, locked && { opacity: 0.4 }]}
+                    disabled={locked}
+                    onPress={() => toggleDuty(item.id)}
+                  >
+                    <Text style={styles.pickerName}>{item.name}</Text>
+                    {selected ? (
+                      <Text style={styles.checkboxMarkOn}>✓</Text>
+                    ) : null}
+                  </Pressable>
+                );
+              }}
+            />
+          </View>
+        </View>
+      </Modal>
+    </StateView>
+  );
+}
+
+function InventoryQtyRow({
+  label,
+  tube,
+  ea,
+  onTubeChange,
+  onEaChange,
+  editable,
+}: {
+  label: string;
+  tube: string;
+  ea: string;
+  onTubeChange: (v: string) => void;
+  onEaChange: (v: string) => void;
+  editable: boolean;
+}) {
+  return (
+    <View style={styles.inventoryRow}>
+      <Text style={styles.inventoryRowLabel}>{label}</Text>
+      <View style={styles.inventoryQtyGroup}>
+        <TextInput
+          style={[styles.inventoryQtyInput, !editable && styles.inventoryReadonly]}
+          value={tube}
+          onChangeText={onTubeChange}
+          editable={editable}
+          keyboardType="number-pad"
+          placeholder="0"
+          placeholderTextColor={colors.textSecondary}
+        />
+        <Text style={styles.inventoryUnit}>통</Text>
+        <TextInput
+          style={[styles.inventoryQtyInput, !editable && styles.inventoryReadonly]}
+          value={ea}
+          onChangeText={onEaChange}
+          editable={editable}
+          keyboardType="number-pad"
+          placeholder="0"
+          placeholderTextColor={colors.textSecondary}
+        />
+        <Text style={styles.inventoryUnit}>개</Text>
       </View>
     </View>
   );
@@ -1804,5 +2286,141 @@ const styles = StyleSheet.create({
     color: colors.white,
     fontFamily: fonts.bodyBold,
     fontSize: 14,
+  },
+  inventoryHint: {
+    fontFamily: fonts.body,
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: spacing.md,
+    lineHeight: 18,
+  },
+  inventoryRow: {
+    marginBottom: spacing.md,
+  },
+  inventoryRowLabel: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 6,
+  },
+  inventoryQtyGroup: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  inventoryQtyInput: {
+    width: 72,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    fontFamily: fonts.body,
+    fontSize: 15,
+    color: colors.text,
+    textAlign: 'center',
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null),
+  },
+  inventoryUnit: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 14,
+    color: colors.text,
+  },
+  inventoryCurrentBox: {
+    borderWidth: 1,
+    borderColor: 'rgba(22, 138, 90, 0.25)',
+    backgroundColor: colors.primarySoft,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    marginBottom: spacing.md,
+  },
+  inventoryCurrentLabel: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 12,
+    color: colors.primary,
+    marginBottom: 4,
+  },
+  inventoryCurrentValue: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 20,
+    color: colors.court,
+  },
+  inventoryFieldLabel: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 6,
+  },
+  dutyPickFull: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 14,
+    marginBottom: spacing.sm,
+  },
+  dutyPickFilled: {
+    borderColor: colors.primary,
+    backgroundColor: colors.primarySoft,
+  },
+  dutyPickText: {
+    flex: 1,
+    fontFamily: fonts.bodyBold,
+    fontSize: 15,
+    color: colors.text,
+  },
+  dutyPickCount: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  dutyClearWrap: {
+    alignSelf: 'flex-start',
+    marginBottom: spacing.md,
+  },
+  dutyClearText: {
+    fontFamily: fonts.bodyMedium,
+    fontSize: 13,
+    color: colors.primary,
+  },
+  inventoryTextArea: {
+    minHeight: 100,
+    borderWidth: 1,
+    borderColor: colors.line,
+    backgroundColor: colors.surface,
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    fontFamily: fonts.body,
+    fontSize: 14,
+    color: colors.text,
+    marginBottom: spacing.md,
+    ...(Platform.OS === 'web' ? ({ outlineStyle: 'none' } as object) : null),
+  },
+  inventoryReadonly: {
+    backgroundColor: colors.background,
+    color: colors.textSecondary,
+  },
+  inventorySaveBtn: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: colors.lime,
+    borderRadius: 14,
+    paddingVertical: 14,
+  },
+  inventorySaveDisabled: {
+    opacity: 0.7,
+  },
+  inventorySaveText: {
+    fontFamily: fonts.bodyBold,
+    fontSize: 15,
+    color: colors.court,
   },
 });
